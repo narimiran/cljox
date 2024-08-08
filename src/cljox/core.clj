@@ -1,7 +1,8 @@
 (ns cljox.core
   (:require
-   [clojure.pprint :as pp]
-   [cljox.scanner :as scanner]))
+   [cljox.scanner :as scanner]
+   [cljox.parser :as parser]
+   [cljox.ast-printer :as ap]))
 
 
 (defn- print-error [message code]
@@ -10,7 +11,13 @@
 
 
 (defn- run [source]
-  (pp/pprint (scanner/scan-tokens source)))
+  (let [[tokens scan-errors] (scanner/scan-tokens source)
+        [expr parse-errors] (parser/parse tokens)
+        errors (concat scan-errors parse-errors)]
+    (if (seq errors)
+      errors
+      (ap/pprint expr))))
+
 
 (defn- run-prompt []
   (print "> ")
