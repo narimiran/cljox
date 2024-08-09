@@ -14,24 +14,20 @@
 
 (defn- run [source]
   (let [[tokens scan-errors] (scanner/scan-tokens source)
-        [expr parse-errors] (parser/parse tokens)
+        [stmts parse-errors] (parser/parse tokens)
         errors (concat scan-errors parse-errors)]
     (if (seq errors)
       (err/print-errors errors)
-      (let [[value error] (i/interpret expr)]
-        (if error
-          (err/print-errors [error])
-          (println value))))))
+      (i/interpret stmts))))
 
 
 
 (defn- run-prompt []
   (print "> ")
   (flush)
-  (let [line (read-line)]
-    (when line
-      (run line)
-      (recur))))
+  (when-let [line (read-line)]
+    (run line)
+    (recur)))
 
 (defn- run-file [filename]
   (try

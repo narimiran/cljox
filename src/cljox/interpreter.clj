@@ -56,6 +56,9 @@
       (:greater :greater-equal :less :less-equal :minus :slash :star)
       (numeric-op operator op-fn l r))))
 
+(defmethod evaluate :expr-stmt
+  [expr]
+  (evaluate (:expr expr)))
 
 (defmethod evaluate :grouping
   [expr]
@@ -64,6 +67,10 @@
 (defmethod evaluate :literal
   [expr]
   (:value expr))
+
+(defmethod evaluate :print-stmt
+  [expr]
+  (println (evaluate (:expr expr))))
 
 
 (defn- truthy? [v]
@@ -80,8 +87,9 @@
       :bang  (not (truthy? value)))))
 
 
-(defn interpret [expr]
-  (try
-    [(evaluate expr)]
-    (catch clojure.lang.ExceptionInfo e
-      [nil (ex-data e)])))
+(defn interpret [stmts]
+  (doseq [stmt stmts]
+    (try
+      (evaluate stmt)
+      (catch clojure.lang.ExceptionInfo e
+        (err/print-errors (ex-data e))))))

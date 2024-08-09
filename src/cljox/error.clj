@@ -22,7 +22,7 @@
 
 
 (defn fmt-error [{:keys [kind line loc msg]}]
-  (format "[%s] Error on line %d at %s: %s" (name kind) line loc msg))
+  (format "[%s] Error on line %d at '%s': %s" (name kind) line loc msg))
 
 
 (defn print-errors [errors]

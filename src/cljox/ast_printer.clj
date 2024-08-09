@@ -29,8 +29,15 @@
   [{:keys [value]}]
   (if (nil? value)
     "nil"
-    value))
+    (str value)))
 
+(defmethod pprint :print-stmt
+  [{:keys [expr]}]
+  (parenthesize "print" expr))
+
+(defmethod pprint :expr-stmt
+  [{:keys [expr]}]
+  (pprint expr))
 
 
 
@@ -39,14 +46,14 @@
 
 
 (comment
- (require '[cljox.token :as token])
  (require '[cljox.ast :as ast])
+ (require '[cljox.scanner :as scanner])
 
  (def example
    (ast/binary
-    (ast/unary (token/create-token :minus "-")
+    (ast/unary (scanner/create-token :minus "-")
                (ast/literal 123))
-    (token/create-token :star "*")
+    (scanner/create-token :star "*")
     (ast/grouping (ast/literal 45.67))))
 
  (pprint example))

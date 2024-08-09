@@ -1,8 +1,5 @@
 (ns cljox.scanner
-  (:require [cljox.token :as token]
-            [cljox.error :as err]
-            [cljox.utils :as u]))
-
+  (:require [cljox.error :as err]))
 
 
 (defn- new-scanner [source]
@@ -15,19 +12,41 @@
    :tokens  []})
 
 
+(defn- create-token
+  ([token-type lexeme]
+   (create-token token-type lexeme nil 1 0))
+  ([token-type lexeme literal line position]
+   {:type    token-type
+    :lexeme  lexeme
+    :literal literal
+    :line    line
+    :pos     position}))
+
 (defn- current-lexeme [{:keys [source start current]}]
   (subs source start current))
 
+(defn- at-end? [{:keys [current length]}]
+  (>= current length))
+
+(defn- in-progress? [m]
+  (not (at-end? m)))
+
+(defn- advance [m]
+  (update m :current inc))
+
+(defn- current-char [{:keys [source current]}]
+  (nth source current))
+
 (defn- matches? [scanner expected]
-  (and (u/in-progress? scanner)
-       (= expected (u/current-element scanner))))
+  (and (in-progress? scanner)
+       (= expected (current-char scanner))))
 
 
 (defn- consume-comment [scanner]
-  (if (or (u/at-end? scanner)
-          (= \newline (u/current-element scanner)))
+  (if (or (at-end? scanner)
+          (= \newline (current-char scanner)))
     scanner
-    (recur (u/advance scanner))))
+    (recur (advance scanner))))
 
 
 (defn- digit? [c]
@@ -54,42 +73,43 @@
    (let [lexeme (case token-type
                   :eof "EOF"
                   (current-lexeme scanner))
-         token (token/create-token token-type
-                                   lexeme
-                                   literal
-                                   (:line scanner))]
+         token (create-token token-type
+                             lexeme
+                             literal
+                             (:line scanner)
+                             (:current scanner))]
      (update scanner :tokens conj token))))
 
 
 (defn- add-string [scanner]
   (cond
-    (u/at-end? scanner)
+    (at-end? scanner)
     (add-error scanner "unterminated string")
 
-    (= \" (u/current-element scanner))
+    (= \" (current-char scanner))
     (let [value (-> (current-lexeme scanner)
                     (subs 1))] ; we don't want \" here
-      (add-token (u/advance scanner) :string value))
+      (add-token (advance scanner) :string value))
 
     :else
-    (recur (u/advance
-            (if (= \newline (u/current-element scanner))
+    (recur (advance
+            (if (= \newline (current-char scanner))
               (update scanner :line inc)
               scanner)))))
 
 
 (defn- consume-digits [scanner]
-  (if (and (u/in-progress? scanner)
-           (digit? (u/current-element scanner)))
-    (recur (u/advance scanner))
+  (if (and (in-progress? scanner)
+           (digit? (current-char scanner)))
+    (recur (advance scanner))
     scanner))
 
 (defn- consume-decimal [scanner]
-  (let [asc (u/advance scanner)]
-    (if (and (u/in-progress? scanner)
-             (= \. (u/current-element scanner))
-             (u/in-progress? asc)
-             (digit? (u/current-element asc)))
+  (let [asc (advance scanner)]
+    (if (and (in-progress? scanner)
+             (= \. (current-char scanner))
+             (in-progress? asc)
+             (digit? (current-char asc)))
       (consume-digits asc)
       scanner)))
 
@@ -108,20 +128,20 @@
     "this" "true" "var" "while"})
 
 (defn- add-identifier [scanner]
-  (if (or (u/at-end? scanner)
-          (not (alphanum? (u/current-element scanner))))
+  (if (or (at-end? scanner)
+          (not (alphanum? (current-char scanner))))
     (let [text (current-lexeme scanner)]
       (if (reserved-words text)
         (add-token scanner (keyword text))
         (add-token scanner :identifier)))
-    (recur (u/advance scanner))))
+    (recur (advance scanner))))
 
 
 
 (defn- scan-token [scanner]
-  (let [c    (u/current-element scanner)
-        asc  (u/advance scanner)
-        aasc (u/advance asc)]
+  (let [c    (current-char scanner)
+        asc  (advance scanner)
+        aasc (advance asc)]
     (case c
       \( (add-token asc :left-paren)
       \) (add-token asc :right-paren)
@@ -165,7 +185,7 @@
 
 (defn scan-tokens [source]
   (loop [scanner (new-scanner source)]
-    (if (u/at-end? scanner)
+    (if (at-end? scanner)
       (let [sc (add-token scanner :eof)]
         [(:tokens sc) (:errors sc)])
       (recur (-> scanner
