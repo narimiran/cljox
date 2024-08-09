@@ -2,12 +2,14 @@
   (:require
    [cljox.scanner :as scanner]
    [cljox.parser :as parser]
-   [cljox.ast-printer :as ap]))
+   [cljox.interpreter :as i]
+   [cljox.error :as err]))
 
 
-(defn- print-error [message code]
+(defn- error-exit [message code]
   (println message)
   (System/exit code))
+
 
 
 (defn- run [source]
@@ -15,8 +17,12 @@
         [expr parse-errors] (parser/parse tokens)
         errors (concat scan-errors parse-errors)]
     (if (seq errors)
-      errors
-      (ap/pprint expr))))
+      (err/print-errors errors)
+      (let [[value error] (i/interpret expr)]
+        (if error
+          (err/print-errors [error])
+          (println value))))))
+
 
 
 (defn- run-prompt []
@@ -32,7 +38,7 @@
     (let [source (slurp filename)]
       (run source))
     (catch java.io.FileNotFoundException e
-      (print-error (.getMessage e) 65))))
+      (error-exit (ex-message e) 65))))
 
 
 
@@ -41,4 +47,4 @@
    (cond
      (zero? arg-num) (run-prompt)
      (= 1 arg-num) (run-file (first args))
-     :else (print-error "Usage: cljox [script]" 64))))
+     :else (error-exit "Usage: cljox [script]" 64))))

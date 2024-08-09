@@ -1,6 +1,8 @@
 (ns cljox.scanner
   (:require [cljox.token :as token]
+            [cljox.error :as err]
             [cljox.utils :as u]))
+
 
 
 (defn- new-scanner [source]
@@ -40,11 +42,8 @@
   (or (alpha? c) (digit? c)))
 
 
-(defn- add-error [scanner message]
-  (let [err {:kind :scanning-error
-             :line (:line scanner)
-             :location (:current scanner)
-             :msg  message}]
+(defn- add-error [scanner msg]
+  (let [err (err/scanning-error scanner msg)]
     (update scanner :errors conj err)))
 
 
@@ -52,11 +51,11 @@
   ([scanner token-type]
    (add-token scanner token-type nil))
   ([scanner token-type literal]
-   (let [text (case token-type
-                :eof "EOF"
-                (current-lexeme scanner))
+   (let [lexeme (case token-type
+                  :eof "EOF"
+                  (current-lexeme scanner))
          token (token/create-token token-type
-                                   text
+                                   lexeme
                                    literal
                                    (:line scanner))]
      (update scanner :tokens conj token))))

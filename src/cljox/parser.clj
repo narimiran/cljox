@@ -1,6 +1,7 @@
 (ns cljox.parser
   (:require [cljox.utils :as u]
-            [cljox.ast :as ast]))
+            [cljox.ast :as ast]
+            [cljox.error :as err]))
 
 
 ;; Grammar
@@ -41,17 +42,17 @@
 
 (defn- add-error [parser msg]
   (let [token (u/current-element parser)
-        err {:kind :parsing-error
-             :line (:line token)
-             :location (:lexeme token)
-             :msg msg}
-        parser' (update parser :errors conj err)]
-     (throw (ex-info "parsing error" parser'))))
+        err (err/parsing-error token msg)]
+    (update parser :errors conj err)))
+
+(defn- throw-error [parser msg]
+  (let [parser' (add-error parser msg)]
+    (throw (ex-info "parsing error" parser'))))
 
 (defn- consume [parser expected msg]
   (if (matches? parser #{expected})
     (u/advance parser)
-    (add-error parser msg)))
+    (throw-error parser msg)))
 
 
 (declare expression)
@@ -70,7 +71,7 @@
           parser' (consume mid :right-paren "expected ')' after expression")]
       (add-expr parser' (ast/grouping (:expr mid))))
 
-    :else (add-error parser "expected expression")))
+    :else (throw-error parser "expected expression")))
 
 
 (defn- unary [parser]
