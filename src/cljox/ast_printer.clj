@@ -6,11 +6,7 @@
 
 
 (defn- parenthesize [name & exprs]
-  (str "("
-       name
-       (when exprs " ")
-       (str/join " " (map pprint exprs))
-       ")"))
+  (format "(%s %s)" name (str/join " " (map pprint exprs))))
 
 
 (defmethod pprint :binary
@@ -40,8 +36,17 @@
   (pprint expr))
 
 
+(defmethod pprint :var-decl
+  [{:keys [token init]}]
+  (format "var %s = %s" (:lexeme token) (pprint init)))
 
+(defmethod pprint :variable
+  [{:keys [token]}]
+  (str "$" (:lexeme token)))
 
+(defmethod pprint nil
+  [_]
+  "nil")
 
 
 

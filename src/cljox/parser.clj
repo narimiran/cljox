@@ -6,7 +6,13 @@
 ;; Grammar
 ;; =======
 ;;
-;; program        → statement* EOF ;
+
+;; program        → declaration* EOF ;
+;;
+;; declaration    → varDecl
+;;                | statement ;
+;;
+;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
 ;; statement      → exprStmt
 ;;                | printStmt ;
@@ -21,8 +27,10 @@
 ;; factor         → unary ( ( "/" | "*" ) unary )* ;
 ;; unary          → ( "!" | "-" ) unary
 ;;                | primary ;
-;; primary        → NUMBER | STRING | "true" | "false" | "nil"
-;;                | "(" expression ")" ;
+;; primary        → "true" | "false" | "nil"
+;;                | NUMBER | STRING
+;;                "(" expression ")"
+;;                | IDENTIFIER ;
 
 
 
@@ -59,6 +67,11 @@
       (add-expr (ast/literal lit))
       advance))
 
+(defn- add-identifier [parser token]
+  (-> parser
+      (add-expr (ast/variable token))
+      advance))
+
 (defn- add-error [parser msg]
   (let [token (current-token parser)
         err (err/parsing-error token msg)]
@@ -84,6 +97,9 @@
 
     (matches? parser #{:number :string})
     (add-literal parser (:literal (current-token parser)))
+
+    (matches? parser #{:identifier})
+    (add-identifier parser (current-token parser))
 
     (matches? parser #{:left-paren})
     (let [mid (expression (advance parser))
@@ -140,6 +156,26 @@
     (print-stmt parser)
     (expression-stmt parser)))
 
+(defn- var-declaration [parser]
+  (let [name (consume parser :identifier "expected variable name")
+        has-init? (matches? name #{:equal})
+        initializer (if has-init?
+                      (expression (advance name))
+                      name)
+        semicolon (consume initializer :semicolon "expected ';' after value")]
+    (add-expr semicolon
+              (ast/var-decl (current-token parser)
+                            (when has-init? (:expr initializer))))))
+
+
+(defn- declaration [parser]
+  (if (matches? parser #{:var})
+    (var-declaration (advance parser))
+    (statement parser)))
+
+
+
+
 (defn- synchronize [parser]
   (cond
     (at-end? parser) parser
@@ -154,7 +190,7 @@
       ((juxt :stmts :errors) parser)
       (recur
        (try
-         (let [parser' (statement parser)]
+         (let [parser' (declaration parser)]
            (update parser' :stmts conj (:expr parser')))
          (catch clojure.lang.ExceptionInfo e
            (synchronize (ex-data e))))))))
@@ -200,4 +236,10 @@
   (testing "3 + (4;")
   (testing "3 + )4;")
   (testing "-3 - -4;")
-  (testing "3; 4+4; print 5; 66; true == true;"))
+  (testing "3; 4+4; print 5; 66; true == true;")
+  (testing "var foo;")
+  (testing "var foo = 3;")
+  (testing "var foo")
+  (testing "foo;")
+  (testing "var foo = 3")
+  (testing "var foo = 3 + 4 * 5; foo; 44;"))

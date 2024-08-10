@@ -27,3 +27,12 @@
   {:type :unary
    :operator operator
    :right right})
+
+(defn var-decl [token initializer]
+  {:type :var-decl
+   :token token
+   :init initializer})
+
+(defn variable [token]
+  {:type :variable
+   :token token})
