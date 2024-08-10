@@ -1,14 +1,19 @@
 (ns cljox.interpreter
-  (:require [cljox.error :as err]))
+  (:require [cljox.error :as err]
+            [cljox.environment :as env]))
 
 
-(defmulti evaluate :type)
+(defmulti evaluate
+  (fn [_ m] (:type m)))
 
 
 (defn- throw-error [token msg]
   (throw (ex-info "runtime error"
                   (err/runtime-error token msg))))
 
+(defn- declare-var [state name value]
+  (env/declare-name! (:env state) name value)
+  state)
 
 (defn- plus [token l r]
   (cond
@@ -44,33 +49,52 @@
    :star          *})
 
 (defmethod evaluate :binary
-  [{:keys [left right operator]}]
-  (let [l       (evaluate left)
-        r       (evaluate right)
+  [state {:keys [left right operator]}]
+  (let [state'  (evaluate state left)
+        l       (:result state')
+        state'' (evaluate state' right)
+        r       (:result state'')
         op-type (:type operator)
         op-fn   (op-type operations)]
-    (case op-type
-      :bang-equal  (not= l r)
-      :equal-equal (= l r)
-      :plus        (plus operator l r)
-      (:greater :greater-equal :less :less-equal :minus :slash :star)
-      (numeric-op operator op-fn l r))))
+    (assoc state'' :result
+           (case op-type
+             :bang-equal  (not= l r)
+             :equal-equal (= l r)
+             :plus        (plus operator l r)
+             (:greater :greater-equal :less :less-equal :minus :slash :star)
+             (numeric-op operator op-fn l r)))))
 
 (defmethod evaluate :expr-stmt
-  [expr]
-  (evaluate (:expr expr)))
+  [state expr]
+  (evaluate state (:expr expr)))
 
 (defmethod evaluate :grouping
-  [expr]
-  (evaluate (:expr expr)))
+  [state expr]
+  (evaluate state (:expr expr)))
 
 (defmethod evaluate :literal
-  [expr]
-  (:value expr))
+  [state expr]
+  (assoc state :result (:value expr)))
 
 (defmethod evaluate :print-stmt
-  [expr]
-  (println (evaluate (:expr expr))))
+  [state expr]
+  (let [state' (evaluate state (:expr expr))]
+    (println (:result state'))
+    (assoc state' :result nil)))
+
+(defmethod evaluate :var-decl
+  [state {:keys [token init]}]
+  (let [state' (if init
+                 (evaluate state init)
+                 (assoc state :result nil))]
+    (-> state'
+        (declare-var (:lexeme token) (:result state'))
+        (assoc :result nil))))
+
+(defmethod evaluate :variable
+  [state {:keys [token]}]
+  (assoc state :result (env/get-var (:env state) token)))
+
 
 
 (defn- truthy? [v]
@@ -80,16 +104,32 @@
     :else      true))
 
 (defmethod evaluate :unary
-  [{:keys [operator right]}]
-  (let [value (evaluate right)]
-    (case (:type operator)
-      :minus (numeric-op operator - value)
-      :bang  (not (truthy? value)))))
+  [state {:keys [operator right]}]
+  (let [state' (evaluate state right)
+        value  (:result state')]
+    (assoc state' :result
+           (case (:type operator)
+             :minus (numeric-op operator - value)
+             :bang  (not (truthy? value))))))
+
+
+(defn- new-state []
+  {:env    (atom {})
+   :result nil
+   :errors []})
 
 
 (defn interpret [stmts]
-  (doseq [stmt stmts]
-    (try
-      (evaluate stmt)
-      (catch clojure.lang.ExceptionInfo e
-        (err/print-errors (ex-data e))))))
+  (loop [[hd & tl] stmts
+         state (new-state)]
+    (if (nil? hd)
+      (:result state)
+      (recur
+       tl
+       (try
+         (evaluate state hd)
+         (catch clojure.lang.ExceptionInfo e
+           (err/print-errors [(ex-data e)])
+           (-> state
+               (update :errors conj (ex-data e))
+               (assoc :result nil))))))))
