@@ -1,6 +1,11 @@
 (ns cljox.ast)
 
 
+(defn assignment [token value]
+  {:type :assignment
+   :token token
+   :value value})
+
 (defn binary [left operator right]
   {:type :binary
    :left left

@@ -15,3 +15,9 @@
     (if (contains? @env lex) ; it can exist and be `nil`
       (@env lex)
       (throw-error token (str "undefined variable '" (:lexeme token) "'")))))
+
+(defn assign! [env token value]
+  (let [name (:lexeme token)]
+    (if (contains? @env name)
+      (declare-name! env name value)
+      (throw-error token (str "undefined variable '" (:lexeme token) "'")))))

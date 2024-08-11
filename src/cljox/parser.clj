@@ -20,7 +20,10 @@
 ;; exprStmt       → expression ";" ;
 ;; printStmt      → "print" expression ";" ;
 ;;
-;; expression     → equality ;
+;; expression     → assignment ;
+;; assignment     → IDENTIFIER "=" assignment
+;;                | equality ;
+;;
 ;; equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 ;; comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 ;; term           → factor ( ( "-" | "+" ) factor )* ;
@@ -138,8 +141,19 @@
 (defn- equality [parser]
   (binary-op parser comparison #{:bang-equal :equal-equal}))
 
+(defn- assignment [parser]
+  (let [left (equality parser)
+        expr (:expr left)]
+    (if (matches? left #{:equal})
+      (let [right (advance left)
+            value (assignment right)]
+        (if (= :variable (:type expr))
+          (add-expr value (ast/assignment (:token expr) (:expr value)))
+          (throw-error left "invalid assignment target")))
+      left)))
+
 (defn- expression [parser]
-  (equality parser))
+  (assignment parser))
 
 (defn- print-stmt [parser]
   (let [value (expression (advance parser))
@@ -242,4 +256,6 @@
   (testing "var foo")
   (testing "foo;")
   (testing "var foo = 3")
-  (testing "var foo = 3 + 4 * 5; foo; 44;"))
+  (testing "var foo = 3 + 4 * 5; foo; 44;")
+  (testing "var foo = 3; foo = 1;")
+  (testing "var foo = 3; foo = 1; print foo;"))

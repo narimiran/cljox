@@ -48,6 +48,12 @@
   [_]
   "nil")
 
+(defmethod pprint :assignment
+  [{:keys [token value]}]
+  (format "%s = %s" (:lexeme token) (pprint value)))
+
+
+
 
 
 (comment

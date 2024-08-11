@@ -15,6 +15,10 @@
   (env/declare-name! (:env state) name value)
   state)
 
+(defn- assign-var [state token value]
+  (env/assign! (:env state) token value)
+  state)
+
 (defn- plus [token l r]
   (cond
     (and (instance? Double l)
@@ -47,6 +51,13 @@
    :minus         -
    :slash         /
    :star          *})
+
+
+(defmethod evaluate :assignment
+  [state {:keys [token value]}]
+  (let [state' (evaluate state value)]
+    (assign-var state' token (:result state'))))
+
 
 (defmethod evaluate :binary
   [state {:keys [left right operator]}]

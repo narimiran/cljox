@@ -26,5 +26,6 @@
 
 
 (defn print-errors [errors]
-  (doseq [error errors]
-    (println (fmt-error error))))
+  (binding [*out* *err*]
+    (doseq [error errors]
+      (println (fmt-error error)))))
