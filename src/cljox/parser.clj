@@ -15,7 +15,10 @@
 ;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
 ;; statement      → exprStmt
-;;                | printStmt ;
+;;                | printStmt
+;;                | block ;
+;;
+;; block          → "{" declaration* "}" ;
 ;;
 ;; exprStmt       → expression ";" ;
 ;; printStmt      → "print" expression ";" ;
@@ -90,7 +93,9 @@
     (throw-error parser msg)))
 
 
+(declare declaration)
 (declare expression)
+
 
 (defn- primary [parser]
   (cond
@@ -160,15 +165,27 @@
         parser' (consume value :semicolon "expected ';' after value")]
     (add-expr parser' (ast/print-stmt (:expr value)))))
 
+(defn- block [parser]
+  (loop [parser (advance parser)
+         stmts []]
+    (if (or (at-end? parser)
+            (matches? parser #{:right-brace}))
+      (let [parser' (consume parser :right-brace "expected '}' after a block")]
+        (add-expr parser' (ast/block stmts)))
+      (let [parser' (declaration parser)
+            stmts' (conj stmts (:expr parser'))]
+        (recur parser' stmts')))))
+
 (defn- expression-stmt [parser]
   (let [value (expression parser)
         parser' (consume value :semicolon "expected ';' after expression")]
     (add-expr parser' (ast/expr-stmt (:expr value)))))
 
 (defn- statement [parser]
-  (if (matches? parser #{:print})
-    (print-stmt parser)
-    (expression-stmt parser)))
+  (cond
+    (matches? parser #{:print}) (print-stmt parser)
+    (matches? parser #{:left-brace}) (block parser)
+    :else (expression-stmt parser)))
 
 (defn- var-declaration [parser]
   (let [name (consume parser :identifier "expected variable name")
@@ -258,4 +275,6 @@
   (testing "var foo = 3")
   (testing "var foo = 3 + 4 * 5; foo; 44;")
   (testing "var foo = 3; foo = 1;")
-  (testing "var foo = 3; foo = 1; print foo;"))
+  (testing "var foo = 3; foo = 1; print foo;")
+
+  (testing "var a = 3; {var a = 4; print a;} print a;"))

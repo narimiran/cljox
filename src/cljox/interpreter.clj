@@ -75,6 +75,18 @@
              (:greater :greater-equal :less :less-equal :minus :slash :star)
              (numeric-op operator op-fn l r)))))
 
+(defn- eval-stmts [state stmts]
+  (reduce evaluate state stmts))
+
+(defmethod evaluate :block
+  [state {:keys [stmts]}]
+  (-> state
+      (update :env env/scope-push)
+      (eval-stmts stmts)
+      (update :env env/scope-pop)
+      (assoc :result nil)))
+
+
 (defmethod evaluate :expr-stmt
   [state expr]
   (evaluate state (:expr expr)))
@@ -125,22 +137,20 @@
 
 
 (defn- new-state []
-  {:env    (atom {})
+  {:env    (env/new-env)
    :result nil
    :errors []})
 
 
 (defn interpret [stmts]
-  (loop [[hd & tl] stmts
-         state (new-state)]
-    (if (nil? hd)
-      (:result state)
-      (recur
-       tl
-       (try
-         (evaluate state hd)
-         (catch clojure.lang.ExceptionInfo e
-           (err/print-errors [(ex-data e)])
-           (-> state
-               (update :errors conj (ex-data e))
-               (assoc :result nil))))))))
+  (-> (reduce (fn [state stmt]
+                (try
+                  (evaluate state stmt)
+                  (catch clojure.lang.ExceptionInfo e
+                    (err/print-errors [(ex-data e)])
+                    (-> state
+                        (update :errors conj (ex-data e))
+                        (assoc :result nil)))))
+              (new-state)
+              stmts)
+      :result))

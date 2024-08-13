@@ -12,6 +12,10 @@
    :operator operator
    :right right})
 
+(defn block [stmts]
+  {:type :block
+   :stmts stmts})
+
 (defn expr-stmt [expr]
   {:type :expr-stmt
    :expr expr})

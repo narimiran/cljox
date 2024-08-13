@@ -52,7 +52,9 @@
   [{:keys [token value]}]
   (format "%s = %s" (:lexeme token) (pprint value)))
 
-
+(defmethod pprint :block
+  [{:keys [stmts]}]
+  (str "{" (str/join "; " (map pprint stmts)) "}"))
 
 
 
