@@ -62,6 +62,13 @@
   (format "(if (%s) then %s else %s)"
           (pprint cnd) (pprint then) (pprint else)))
 
+(defmethod pprint :logical
+  [{:keys [left operator right]}]
+  (parenthesize (:lexeme operator) left right))
+
+
+
+
 
 (comment
  (require '[cljox.ast :as ast])

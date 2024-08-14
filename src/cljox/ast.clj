@@ -34,6 +34,12 @@
   {:type :literal
    :value value})
 
+(defn logical [left operator right]
+  {:type :logical
+   :left left
+   :operator operator
+   :right right})
+
 (defn print-stmt [expr]
   {:type :print-stmt
    :expr expr})

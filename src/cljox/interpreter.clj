@@ -113,6 +113,16 @@
   [state expr]
   (assoc state :result (:value expr)))
 
+(defmethod evaluate :logical
+  [state {:keys [left operator right]}]
+  (let [state' (evaluate state left)
+        l (:result state')
+        op-type (:type operator)]
+    (cond
+      (and (= :or op-type) (truthy? l)) state'
+      (and (= :and op-type) (not (truthy? l))) state'
+      :else (evaluate state' right))))
+
 (defmethod evaluate :print-stmt
   [state expr]
   (let [state' (evaluate state (:expr expr))]

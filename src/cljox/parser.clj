@@ -28,7 +28,9 @@
 ;;
 ;; expression     → assignment ;
 ;; assignment     → IDENTIFIER "=" assignment
-;;                | equality ;
+;;                | logic_or ;
+;; logic_or       → logic_and ( "or" logic_and )* ;
+;; logic_and      → equality ( "and" equality )* ;
 ;;
 ;; equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 ;; comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
@@ -129,14 +131,16 @@
     (primary parser)))
 
 
-(defn- binary-op [parser op-method token-types]
-  (loop [left (op-method parser)]
-    (if (matches? left token-types)
-      (let [operator (current-token left)
-            right (op-method (advance left))]
-        (recur (add-expr right (ast/binary (:expr left) operator (:expr right)))))
-      left)))
-
+(defn- binary-op
+  ([parser op-method token-types]
+   (binary-op parser ast/binary op-method token-types))
+  ([parser ast-func op-method token-types]
+   (loop [left (op-method parser)]
+     (if (matches? left token-types)
+       (let [operator (current-token left)
+             right (op-method (advance left))]
+         (recur (add-expr right (ast-func (:expr left) operator (:expr right)))))
+       left))))
 
 (defn- factor [parser]
   (binary-op parser unary #{:slash :star}))
@@ -150,8 +154,14 @@
 (defn- equality [parser]
   (binary-op parser comparison #{:bang-equal :equal-equal}))
 
+(defn- logic-and [parser]
+  (binary-op parser ast/logical equality #{:and}))
+
+(defn- logic-or [parser]
+  (binary-op parser ast/logical logic-and #{:or}))
+
 (defn- assignment [parser]
-  (let [left (equality parser)
+  (let [left (logic-or parser)
         expr (:expr left)]
     (if (matches? left #{:equal})
       (let [right (advance left)
@@ -297,4 +307,9 @@
 
   (testing "if (true) 3; else 4;")
   (testing "if (true) 3; 4;")
-  (testing "if (7) 3; else 4;"))
+  (testing "if (7) 3; else 4;")
+
+  (testing "true and false;")
+  (testing "false and true;")
+  (testing "false and true or false;")
+  (testing "false and (true or false);"))
