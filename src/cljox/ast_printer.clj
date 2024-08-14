@@ -57,6 +57,11 @@
   (str "{" (str/join "; " (map pprint stmts)) "}"))
 
 
+(defmethod pprint :if-stmt
+  [{:keys [cnd then else]}]
+  (format "(if (%s) then %s else %s)"
+          (pprint cnd) (pprint then) (pprint else)))
+
 
 (comment
  (require '[cljox.ast :as ast])

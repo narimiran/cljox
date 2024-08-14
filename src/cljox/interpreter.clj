@@ -19,6 +19,12 @@
   (env/assign! (:env state) token value)
   state)
 
+(defn- truthy? [v]
+  (cond
+    (nil? v)   false
+    (false? v) false
+    :else      true))
+
 (defn- plus [token l r]
   (cond
     (and (instance? Double l)
@@ -95,6 +101,14 @@
   [state expr]
   (evaluate state (:expr expr)))
 
+(defmethod evaluate :if-stmt
+  [state {:keys [cnd then else]}]
+  (let [state' (evaluate state cnd)]
+    (cond
+      (truthy? (:result state')) (evaluate state' then)
+      (some? else) (evaluate state' else)
+      :else (assoc state' :result nil))))
+
 (defmethod evaluate :literal
   [state expr]
   (assoc state :result (:value expr)))
@@ -119,12 +133,6 @@
   (assoc state :result (env/get-var (:env state) token)))
 
 
-
-(defn- truthy? [v]
-  (cond
-    (nil? v)   false
-    (false? v) false
-    :else      true))
 
 (defmethod evaluate :unary
   [state {:keys [operator right]}]

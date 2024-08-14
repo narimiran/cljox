@@ -12,15 +12,18 @@
 ;; declaration    → varDecl
 ;;                | statement ;
 ;;
+;; block          → "{" declaration* "}" ;
+;;
 ;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
 ;; statement      → exprStmt
+;;                | ifStmt
 ;;                | printStmt
 ;;                | block ;
 ;;
-;; block          → "{" declaration* "}" ;
-;;
 ;; exprStmt       → expression ";" ;
+;; ifStmt         → "if" "(" expression ")" statement
+;;                ( "else" statement )? ;
 ;; printStmt      → "print" expression ";" ;
 ;;
 ;; expression     → assignment ;
@@ -95,6 +98,7 @@
 
 (declare declaration)
 (declare expression)
+(declare statement)
 
 
 (defn- primary [parser]
@@ -165,6 +169,17 @@
         parser' (consume value :semicolon "expected ';' after value")]
     (add-expr parser' (ast/print-stmt (:expr value)))))
 
+(defn- if-stmt [parser]
+  (let [parser' (consume (advance parser) :left-paren "expected '(' after 'if'")
+        condition (expression parser')
+        parser'' (consume condition :right-paren "expected ')' after if condition")
+        then-branch (statement parser'')
+        else-branch (when (matches? then-branch #{:else})
+                      (statement (advance then-branch)))]
+    (add-expr (or else-branch then-branch)
+              (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
+
+
 (defn- block [parser]
   (loop [parser (advance parser)
          stmts []]
@@ -184,6 +199,7 @@
 (defn- statement [parser]
   (cond
     (matches? parser #{:print}) (print-stmt parser)
+    (matches? parser #{:if}) (if-stmt parser)
     (matches? parser #{:left-brace}) (block parser)
     :else (expression-stmt parser)))
 
@@ -277,4 +293,8 @@
   (testing "var foo = 3; foo = 1;")
   (testing "var foo = 3; foo = 1; print foo;")
 
-  (testing "var a = 3; {var a = 4; print a;} print a;"))
+  (testing "var a = 3; {var a = 4; print a;} print a;")
+
+  (testing "if (true) 3; else 4;")
+  (testing "if (true) 3; 4;")
+  (testing "if (7) 3; else 4;"))

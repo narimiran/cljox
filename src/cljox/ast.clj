@@ -24,6 +24,12 @@
   {:type :grouping
    :expr expr})
 
+(defn if-stmt [condition then-branch else-branch]
+  {:type :if-stmt
+   :cnd condition
+   :then then-branch
+   :else else-branch})
+
 (defn literal [value]
   {:type :literal
    :value value})
