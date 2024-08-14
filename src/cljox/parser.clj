@@ -15,12 +15,16 @@
 ;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
 ;; statement      → exprStmt
+;;                | forStmt
 ;;                | ifStmt
 ;;                | printStmt
 ;;                | whileStmt
 ;;                | block ;
 ;;
 ;; exprStmt       → expression ";" ;
+;; forStmt        → "for" "(" ( varDecl | exprStmt | ";")
+;;                  expression? ";"
+;;                  expression? ")" statement ;
 ;; ifStmt         → "if" "(" expression ")" statement
 ;;                ( "else" statement )? ;
 ;; printStmt      → "print" expression ";" ;
@@ -118,8 +122,8 @@
 
     (matches? parser #{:left-paren})
     (let [mid (expression (advance parser))
-          parser' (consume mid :right-paren "expected ')' after expression")]
-      (add-expr parser' (ast/grouping (:expr mid))))
+          r-par (consume mid :right-paren "expected ')' after expression")]
+      (add-expr r-par (ast/grouping (:expr mid))))
 
     :else (throw-error parser "expected expression")))
 
@@ -175,28 +179,66 @@
 (defn- expression [parser]
   (assignment parser))
 
+(defn- var-declaration [parser]
+  (let [name (consume parser :identifier "expected variable name")
+        has-init? (matches? name #{:equal})
+        initializer (if has-init?
+                      (expression (advance name))
+                      name)
+        semicolon (consume initializer :semicolon "expected ';' after value")]
+    (add-expr semicolon
+              (ast/var-decl (current-token parser)
+                            (when has-init? (:expr initializer))))))
+
+(defn- expression-stmt [parser]
+  (let [value (expression parser)
+        semi (consume value :semicolon "expected ';' after expression")]
+    (add-expr semi (ast/expr-stmt (:expr value)))))
+
 (defn- print-stmt [parser]
   (let [value (expression (advance parser))
-        parser' (consume value :semicolon "expected ';' after value")]
-    (add-expr parser' (ast/print-stmt (:expr value)))))
+        semi (consume value :semicolon "expected ';' after value")]
+    (add-expr semi (ast/print-stmt (:expr value)))))
 
 (defn- if-stmt [parser]
-  (let [parser' (consume (advance parser) :left-paren "expected '(' after 'if'")
-        condition (expression parser')
-        parser'' (consume condition :right-paren "expected ')' after if condition")
-        then-branch (statement parser'')
+  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'if'")
+        condition (expression l-par)
+        r-par (consume condition :right-paren "expected ')' after if condition")
+        then-branch (statement r-par)
         else-branch (when (matches? then-branch #{:else})
                       (statement (advance then-branch)))]
     (add-expr (or else-branch then-branch)
               (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
 
 (defn- while-stmt [parser]
-  (let [parser' (consume (advance parser) :left-paren "expected '(' after 'while'")
-        condition (expression parser')
-        parser'' (consume condition :right-paren "expected ')' after condition")
-        body (statement parser'')]
+  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'while'")
+        condition (expression l-par)
+        r-par (consume condition :right-paren "expected ')' after condition")
+        body (statement r-par)]
     (add-expr body
               (ast/while-stmt (:expr condition) (:expr body)))))
+
+(defn- for-loop [parser]
+  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'for'")
+        init  (cond
+                (matches? l-par #{:semicolon}) (advance (add-expr l-par nil))
+                (matches? l-par #{:var}) (var-declaration (advance l-par))
+                :else (expression-stmt l-par))
+        cnd   (if (matches? init #{:semicolon})
+                (add-literal init true)
+                (expression-stmt init))
+        incr  (if (matches? cnd #{:right-paren})
+                (add-expr cnd nil)
+                (expression cnd))
+        r-par (consume incr :right-paren "expected ')' after 'for' clause")
+        body  (statement r-par)
+        [init-expr cnd-expr incr-expr body-expr] (map :expr [init cnd incr body])]
+    (cond->> body-expr
+      incr-expr (#(ast/block [% incr-expr]))
+      true      (ast/while-stmt cnd-expr)
+      init-expr (#(ast/block [init-expr %]))
+      true      (add-expr body))))
+
 
 (defn- block [parser]
   (loop [parser (advance parser)
@@ -209,30 +251,14 @@
             stmts' (conj stmts (:expr parser'))]
         (recur parser' stmts')))))
 
-(defn- expression-stmt [parser]
-  (let [value (expression parser)
-        parser' (consume value :semicolon "expected ';' after expression")]
-    (add-expr parser' (ast/expr-stmt (:expr value)))))
-
 (defn- statement [parser]
   (cond
     (matches? parser #{:print}) (print-stmt parser)
+    (matches? parser #{:for}) (for-loop parser)
     (matches? parser #{:if}) (if-stmt parser)
     (matches? parser #{:while}) (while-stmt parser)
     (matches? parser #{:left-brace}) (block parser)
     :else (expression-stmt parser)))
-
-(defn- var-declaration [parser]
-  (let [name (consume parser :identifier "expected variable name")
-        has-init? (matches? name #{:equal})
-        initializer (if has-init?
-                      (expression (advance name))
-                      name)
-        semicolon (consume initializer :semicolon "expected ';' after value")]
-    (add-expr semicolon
-              (ast/var-decl (current-token parser)
-                            (when has-init? (:expr initializer))))))
-
 
 (defn- declaration [parser]
   (if (matches? parser #{:var})
@@ -324,4 +350,9 @@
   (testing "false and (true or false);")
 
   (testing "while (3 < 5) print 4; print 6;")
-  (testing "while (3 < 5) {1+ 2; 3 + 4;} 5 + 4;"))
+  (testing "while (3 < 5) {1+ 2; 3 + 4;} 5 + 4;")
+  (testing "for (var a = 0;\n a < 3;\n a = a + 1) print a; ")
+  (testing "for (var a = 0;\n a < 3;\n a = a + 1) { print a; }")
+  (testing "var a = 0; for (var b = 1; a < 3; a = a + 1) print a;")
+  (testing "var a = 0; for (a; a < 3; a = a + 1) { print a+1; }")
+  (testing "var a = 0; for (; a < 3; a = a + 1) { print a+1; }"))
