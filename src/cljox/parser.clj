@@ -12,19 +12,20 @@
 ;; declaration    → varDecl
 ;;                | statement ;
 ;;
-;; block          → "{" declaration* "}" ;
-;;
 ;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
 ;; statement      → exprStmt
 ;;                | ifStmt
 ;;                | printStmt
+;;                | whileStmt
 ;;                | block ;
 ;;
 ;; exprStmt       → expression ";" ;
 ;; ifStmt         → "if" "(" expression ")" statement
 ;;                ( "else" statement )? ;
 ;; printStmt      → "print" expression ";" ;
+;; whileStmt      → "while" "(" expression ")" statement ;
+;; block          → "{" declaration* "}" ;
 ;;
 ;; expression     → assignment ;
 ;; assignment     → IDENTIFIER "=" assignment
@@ -189,6 +190,13 @@
     (add-expr (or else-branch then-branch)
               (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
 
+(defn- while-stmt [parser]
+  (let [parser' (consume (advance parser) :left-paren "expected '(' after 'while'")
+        condition (expression parser')
+        parser'' (consume condition :right-paren "expected ')' after condition")
+        body (statement parser'')]
+    (add-expr body
+              (ast/while-stmt (:expr condition) (:expr body)))))
 
 (defn- block [parser]
   (loop [parser (advance parser)
@@ -210,6 +218,7 @@
   (cond
     (matches? parser #{:print}) (print-stmt parser)
     (matches? parser #{:if}) (if-stmt parser)
+    (matches? parser #{:while}) (while-stmt parser)
     (matches? parser #{:left-brace}) (block parser)
     :else (expression-stmt parser)))
 
@@ -312,4 +321,7 @@
   (testing "true and false;")
   (testing "false and true;")
   (testing "false and true or false;")
-  (testing "false and (true or false);"))
+  (testing "false and (true or false);")
+
+  (testing "while (3 < 5) print 4; print 6;")
+  (testing "while (3 < 5) {1+ 2; 3 + 4;} 5 + 4;"))

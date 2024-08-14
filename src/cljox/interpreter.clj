@@ -142,7 +142,12 @@
   [state {:keys [token]}]
   (assoc state :result (env/get-var (:env state) token)))
 
-
+(defmethod evaluate :while-stmt
+  [state {:keys [cnd body] :as while}]
+  (let [state' (evaluate state cnd)]
+    (if (truthy? (:result state'))
+      (recur (evaluate state' body) while)
+      (assoc state' :result nil))))
 
 (defmethod evaluate :unary
   [state {:keys [operator right]}]

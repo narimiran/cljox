@@ -66,6 +66,11 @@
   [{:keys [left operator right]}]
   (parenthesize (:lexeme operator) left right))
 
+(defmethod pprint :while-stmt
+  [{:keys [cnd body]}]
+  (format "(while (%s) do %s)"
+          (pprint cnd) (pprint body)))
+
 
 
 

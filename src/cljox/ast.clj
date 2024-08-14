@@ -57,3 +57,8 @@
 (defn variable [token]
   {:type :variable
    :token token})
+
+(defn while-stmt [condition body]
+  {:type :while-stmt
+   :cnd condition
+   :body body})
