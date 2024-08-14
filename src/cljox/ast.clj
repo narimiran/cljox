@@ -16,6 +16,12 @@
   {:type :block
    :stmts stmts})
 
+(defn call [calee paren arguments]
+  {:type :call
+   :calee calee
+   :paren paren
+   :args arguments})
+
 (defn expr-stmt [expr]
   {:type :expr-stmt
    :expr expr})

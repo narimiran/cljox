@@ -4,9 +4,9 @@
 
 
 (defn new-env
-  ([] (new-env nil))
-  ([enclosing]
-   (atom {:enclosing enclosing})))
+  ([] (new-env {}))
+  ([natives]
+   (atom (assoc natives :enclosing nil))))
 
 
 (defn- throw-error [token msg]

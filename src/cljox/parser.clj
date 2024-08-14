@@ -41,8 +41,9 @@
 ;; comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 ;; term           → factor ( ( "-" | "+" ) factor )* ;
 ;; factor         → unary ( ( "/" | "*" ) unary )* ;
-;; unary          → ( "!" | "-" ) unary
-;;                | primary ;
+;; unary          → ( "!" | "-" ) unary | call ;
+;; call           → primary ( "(" arguments? ")" )* ;
+;; arguments      → expression ( "," expression )* ;
 ;; primary        → "true" | "false" | "nil"
 ;;                | NUMBER | STRING
 ;;                "(" expression ")"
@@ -127,13 +128,33 @@
 
     :else (throw-error parser "expected expression")))
 
+(defn- finish-call [parser calee]
+  (loop [parser parser
+         args []]
+    (if (matches? parser #{:right-paren})
+      (add-expr (advance parser) (ast/call calee (current-token parser) args))
+      (let [parser' (expression parser)
+            parser'' (if (>= (count args) 255)
+                       (add-error parser' "cannot have more than 255 arguments")
+                       parser')
+            args' (conj args (:expr parser''))]
+        (if (matches? parser'' #{:comma})
+          (recur (advance parser'') args')
+          (let [r-par (consume parser'' :right-paren "expect ')' after arguments")]
+            (add-expr r-par (ast/call calee (current-token parser'') args'))))))))
+
+(defn- call [parser]
+  (loop [parser (primary parser)]
+    (if (matches? parser #{:left-paren})
+      (recur (finish-call (advance parser) (:expr parser)))
+      parser)))
 
 (defn- unary [parser]
   (if (matches? parser #{:bang :minus})
     (let [operator (current-token parser)
           right (unary (advance parser))]
       (add-expr right (ast/unary operator (:expr right))))
-    (primary parser)))
+    (call parser)))
 
 
 (defn- binary-op
@@ -355,4 +376,10 @@
   (testing "for (var a = 0;\n a < 3;\n a = a + 1) { print a; }")
   (testing "var a = 0; for (var b = 1; a < 3; a = a + 1) print a;")
   (testing "var a = 0; for (a; a < 3; a = a + 1) { print a+1; }")
-  (testing "var a = 0; for (; a < 3; a = a + 1) { print a+1; }"))
+  (testing "var a = 0; for (; a < 3; a = a + 1) { print a+1; }")
+
+  (testing "average(1, 2, 3);")
+  (testing "average(1 + 2, 3);")
+  (testing "average();")
+  (testing "average(1)(2)(3);")
+  (testing "clock();"))

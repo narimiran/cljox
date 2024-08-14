@@ -71,7 +71,10 @@
   (format "(while (%s) do %s)"
           (pprint cnd) (pprint body)))
 
-
+(defmethod pprint :call
+  [{:keys [calee args]}]
+  (format "(calling %s [%s])"
+          (pprint calee) (str/join ", " (map pprint args))))
 
 
 

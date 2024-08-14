@@ -1,6 +1,7 @@
 (ns cljox.interpreter
   (:require [cljox.error :as err]
-            [cljox.environment :as env]))
+            [cljox.environment :as env]
+            [cljox.callable :as callable]))
 
 
 (defmulti evaluate
@@ -92,6 +93,30 @@
       (update :env env/scope-pop)
       (assoc :result nil)))
 
+(defn- eval-args [state args]
+  (reduce
+   (fn [s arg]
+     (let [res (:result s)
+           s' (evaluate s arg)]
+       (assoc s' :result (conj res (:result s')))))
+   (assoc state :result [])
+   args))
+
+(defmethod evaluate :call
+  [state {:keys [calee args paren]}]
+  (let [state' (evaluate state calee)
+        calee' (:result state')
+        state'' (eval-args state' args)
+        args' (:result state'')]
+    (cond
+      (not (satisfies? callable/LoxCallable calee'))
+      (throw-error paren "can only call functions and classes")
+
+      (not= (callable/arity calee') (count args'))
+      (throw-error paren (format "expected %d arguments, but got %d"
+                                 (callable/arity calee') (count args')))
+      :else
+      (callable/call calee' state'' args'))))
 
 (defmethod evaluate :expr-stmt
   [state expr]
@@ -158,11 +183,22 @@
              :minus (numeric-op operator - value)
              :bang  (not (truthy? value))))))
 
+(def clock
+  (reify callable/LoxCallable
+    (arity [_] 0)
+    (call [_ state _]
+      (assoc state :result (/ (System/currentTimeMillis) 1000.0)))
+    (to-string [_] "<native fn>")))
+
+(def natives
+  {"clock" clock})
 
 (defn- new-state []
-  {:env    (env/new-env)
-   :result nil
-   :errors []})
+  (let [globals (env/new-env natives)]
+    {:env     globals
+     :globals globals
+     :result  nil
+     :errors  []}))
 
 
 (defn interpret [stmts]
