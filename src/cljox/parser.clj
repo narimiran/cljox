@@ -9,8 +9,14 @@
 
 ;; program        → declaration* EOF ;
 ;;
-;; declaration    → varDecl
+;; declaration    → funDecl
+;;                | varDecl
 ;;                | statement ;
+;;
+;; funDecl        → "fun" function ;
+;; function       → IDENTIFIER "(" parameters? ")" block ;
+;;
+;; parameters     → IDENTIFIER ( "," IDENTIFIER )* ;
 ;;
 ;; varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
 ;;
@@ -200,7 +206,7 @@
 (defn- expression [parser]
   (assignment parser))
 
-(defn- var-declaration [parser]
+(defn- var-decl [parser]
   (let [name (consume parser :identifier "expected variable name")
         has-init? (matches? name #{:equal})
         initializer (if has-init?
@@ -243,7 +249,7 @@
   (let [l-par (consume (advance parser) :left-paren "expected '(' after 'for'")
         init  (cond
                 (matches? l-par #{:semicolon}) (advance (add-expr l-par nil))
-                (matches? l-par #{:var}) (var-declaration (advance l-par))
+                (matches? l-par #{:var}) (var-decl (advance l-par))
                 :else (expression-stmt l-par))
         cnd   (if (matches? init #{:semicolon})
                 (add-literal init true)
@@ -262,7 +268,7 @@
 
 
 (defn- block [parser]
-  (loop [parser (advance parser)
+  (loop [parser parser
          stmts []]
     (if (or (at-end? parser)
             (matches? parser #{:right-brace}))
@@ -272,19 +278,48 @@
             stmts' (conj stmts (:expr parser'))]
         (recur parser' stmts')))))
 
+(defn- parameters [parser]
+  (if (matches? parser #{:right-paren})
+    (assoc (advance parser) :expr [])
+    (loop [parser parser
+           params []]
+      (let [parser' (consume parser :identifier "expected parameter name")
+            parser'' (if (>= (count params) 255)
+                       (add-error parser' "cannot have more than 255 parameters")
+                       parser')
+            params' (conj params (current-token parser))]
+        (if (matches? parser'' #{:comma})
+          (recur (advance parser'') params')
+          (let [r-par (consume parser'' :right-paren "expected ')' after parameters")]
+            (assoc r-par :expr params')))))))
+
+(defn- func-decl [parser kind]
+  (let [name-token (current-token parser)
+        kind-name (name kind)
+        fname (consume parser :identifier (str "expected " kind-name " name"))
+        l-par (consume fname :left-paren (str "expected '(' after " kind-name " name"))
+        params (parameters l-par)
+        l-brace (consume params :left-brace (str "expected '{' before " kind-name " body"))
+        body (block l-brace)
+        stmts (-> body :expr :stmts)]
+    (add-expr body (ast/func-decl name-token (:expr params) stmts))))
+
+
+
 (defn- statement [parser]
   (cond
     (matches? parser #{:print}) (print-stmt parser)
     (matches? parser #{:for}) (for-loop parser)
     (matches? parser #{:if}) (if-stmt parser)
     (matches? parser #{:while}) (while-stmt parser)
-    (matches? parser #{:left-brace}) (block parser)
+    (matches? parser #{:left-brace}) (block (advance parser))
     :else (expression-stmt parser)))
 
 (defn- declaration [parser]
-  (if (matches? parser #{:var})
-    (var-declaration (advance parser))
-    (statement parser)))
+  (cond
+    (matches? parser #{:var}) (var-decl (advance parser))
+    (matches? parser #{:fun}) (func-decl (advance parser) :func)
+    :else (statement parser)))
 
 
 
@@ -382,4 +417,6 @@
   (testing "average(1 + 2, 3);")
   (testing "average();")
   (testing "average(1)(2)(3);")
-  (testing "clock();"))
+  (testing "clock();")
+
+  (testing "fun foo(a, b) {print a + b;}"))

@@ -76,6 +76,18 @@
   (format "(calling %s [%s])"
           (pprint calee) (str/join ", " (map pprint args))))
 
+(defmethod pprint :func-decl
+  [{:keys [token params body]}]
+  (format "fun %s (%s) {%s}"
+          (:lexeme token)
+          (str/join ", " (map pprint params))
+          (str/join "; " (map pprint body))))
+
+(defmethod pprint :identifier
+  [token]
+  (:lexeme token))
+
+
 
 
 (comment

@@ -26,6 +26,12 @@
   {:type :expr-stmt
    :expr expr})
 
+(defn func-decl [token params body]
+  {:type :func-decl
+   :token token
+   :params params
+   :body body})
+
 (defn grouping [expr]
   {:type :grouping
    :expr expr})
