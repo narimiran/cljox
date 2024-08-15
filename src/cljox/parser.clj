@@ -79,7 +79,9 @@
 
 (defn- matches? [parser expected]
   (and (not (at-end? parser))
-       (expected (current-type parser))))
+       (if (= clojure.lang.PersistentHashSet (type expected))
+         (expected (current-type parser))
+         (= expected (current-type parser)))))
 
 
 (defn- add-expr [parser expr]
@@ -105,7 +107,7 @@
     (throw (ex-info "parsing error" parser'))))
 
 (defn- consume [parser expected msg]
-  (if (matches? parser #{expected})
+  (if (matches? parser expected)
     (advance parser)
     (throw-error parser msg)))
 
@@ -117,17 +119,17 @@
 
 (defn- primary [parser]
   (cond
-    (matches? parser #{:false}) (add-literal parser false)
-    (matches? parser #{:true})  (add-literal parser true)
-    (matches? parser #{:nil})   (add-literal parser nil)
+    (matches? parser :false) (add-literal parser false)
+    (matches? parser :true)  (add-literal parser true)
+    (matches? parser :nil)   (add-literal parser nil)
 
     (matches? parser #{:number :string})
     (add-literal parser (:literal (current-token parser)))
 
-    (matches? parser #{:identifier})
+    (matches? parser :identifier)
     (add-identifier parser (current-token parser))
 
-    (matches? parser #{:left-paren})
+    (matches? parser :left-paren)
     (let [mid (expression (advance parser))
           r-par (consume mid :right-paren "expected ')' after expression")]
       (add-expr r-par (ast/grouping (:expr mid))))
@@ -137,21 +139,21 @@
 (defn- finish-call [parser calee]
   (loop [parser parser
          args []]
-    (if (matches? parser #{:right-paren})
+    (if (matches? parser :right-paren)
       (add-expr (advance parser) (ast/call calee (current-token parser) args))
       (let [parser' (expression parser)
             parser'' (if (>= (count args) 255)
                        (add-error parser' "cannot have more than 255 arguments")
                        parser')
             args' (conj args (:expr parser''))]
-        (if (matches? parser'' #{:comma})
+        (if (matches? parser'' :comma)
           (recur (advance parser'') args')
           (let [r-par (consume parser'' :right-paren "expect ')' after arguments")]
             (add-expr r-par (ast/call calee (current-token parser'') args'))))))))
 
 (defn- call [parser]
   (loop [parser (primary parser)]
-    (if (matches? parser #{:left-paren})
+    (if (matches? parser :left-paren)
       (recur (finish-call (advance parser) (:expr parser)))
       parser)))
 
@@ -195,7 +197,7 @@
 (defn- assignment [parser]
   (let [left (logic-or parser)
         expr (:expr left)]
-    (if (matches? left #{:equal})
+    (if (matches? left :equal)
       (let [right (advance left)
             value (assignment right)]
         (if (= :variable (:type expr))
@@ -208,7 +210,7 @@
 
 (defn- var-decl [parser]
   (let [name (consume parser :identifier "expected variable name")
-        has-init? (matches? name #{:equal})
+        has-init? (matches? name :equal)
         initializer (if has-init?
                       (expression (advance name))
                       name)
@@ -232,7 +234,7 @@
         condition (expression l-par)
         r-par (consume condition :right-paren "expected ')' after if condition")
         then-branch (statement r-par)
-        else-branch (when (matches? then-branch #{:else})
+        else-branch (when (matches? then-branch :else)
                       (statement (advance then-branch)))]
     (add-expr (or else-branch then-branch)
               (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
@@ -248,10 +250,10 @@
 (defn- for-loop [parser]
   (let [l-par (consume (advance parser) :left-paren "expected '(' after 'for'")
         init  (cond
-                (matches? l-par #{:semicolon}) (advance (add-expr l-par nil))
-                (matches? l-par #{:var}) (var-decl (advance l-par))
+                (matches? l-par :semicolon) (advance (add-expr l-par nil))
+                (matches? l-par :var) (var-decl (advance l-par))
                 :else (expression-stmt l-par))
-        cnd   (if (matches? init #{:semicolon})
+        cnd   (if (matches? init :semicolon)
                 (add-literal init true)
                 (expression-stmt init))
         incr  (if (matches? cnd #{:right-paren})
@@ -271,7 +273,7 @@
   (loop [parser parser
          stmts []]
     (if (or (at-end? parser)
-            (matches? parser #{:right-brace}))
+            (matches? parser :right-brace))
       (let [parser' (consume parser :right-brace "expected '}' after a block")]
         (add-expr parser' (ast/block stmts)))
       (let [parser' (declaration parser)
@@ -279,7 +281,7 @@
         (recur parser' stmts')))))
 
 (defn- parameters [parser]
-  (if (matches? parser #{:right-paren})
+  (if (matches? parser :right-paren)
     (assoc (advance parser) :expr [])
     (loop [parser parser
            params []]
@@ -288,7 +290,7 @@
                        (add-error parser' "cannot have more than 255 parameters")
                        parser')
             params' (conj params (current-token parser))]
-        (if (matches? parser'' #{:comma})
+        (if (matches? parser'' :comma)
           (recur (advance parser'') params')
           (let [r-par (consume parser'' :right-paren "expected ')' after parameters")]
             (assoc r-par :expr params')))))))
@@ -308,17 +310,17 @@
 
 (defn- statement [parser]
   (cond
-    (matches? parser #{:print}) (print-stmt parser)
-    (matches? parser #{:for}) (for-loop parser)
-    (matches? parser #{:if}) (if-stmt parser)
-    (matches? parser #{:while}) (while-stmt parser)
-    (matches? parser #{:left-brace}) (block (advance parser))
+    (matches? parser :print) (print-stmt parser)
+    (matches? parser :for) (for-loop parser)
+    (matches? parser :if) (if-stmt parser)
+    (matches? parser :while) (while-stmt parser)
+    (matches? parser :left-brace) (block (advance parser))
     :else (expression-stmt parser)))
 
 (defn- declaration [parser]
   (cond
-    (matches? parser #{:var}) (var-decl (advance parser))
-    (matches? parser #{:fun}) (func-decl (advance parser) :func)
+    (matches? parser :var) (var-decl (advance parser))
+    (matches? parser :fun) (func-decl (advance parser) :func)
     :else (statement parser)))
 
 
@@ -327,7 +329,7 @@
 (defn- synchronize [parser]
   (cond
     (at-end? parser) parser
-    (matches? parser #{:semicolon}) (advance parser)
+    (matches? parser :semicolon) (advance parser)
     (matches? parser #{:class :fun :var :for :if :while :print :return}) parser
     :else (recur (advance parser))))
 
@@ -408,7 +410,7 @@
   (testing "while (3 < 5) print 4; print 6;")
   (testing "while (3 < 5) {1+ 2; 3 + 4;} 5 + 4;")
   (testing "for (var a = 0;\n a < 3;\n a = a + 1) print a; ")
-  (testing "for (var a = 0;\n a < 3;\n a = a + 1) { print a; }")
+  (testing "for (var a = 0;\n a < 3;\n a = a + 1) print a;")
   (testing "var a = 0; for (var b = 1; a < 3; a = a + 1) print a;")
   (testing "var a = 0; for (a; a < 3; a = a + 1) { print a+1; }")
   (testing "var a = 0; for (; a < 3; a = a + 1) { print a+1; }")
