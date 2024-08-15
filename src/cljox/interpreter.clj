@@ -1,5 +1,6 @@
 (ns cljox.interpreter
-  (:require [cljox.error :as err]
+  (:require [clojure.string :as str]
+            [cljox.error :as err]
             [cljox.environment :as env]
             [cljox.callable :as callable]))
 
@@ -12,8 +13,8 @@
   (throw (ex-info "runtime error"
                   (err/runtime-error token msg))))
 
-(defn- declare-var [state name value]
-  (env/declare-name! (:env state) name value)
+(defn- declare-var [state token value]
+  (env/declare-name! (:env state) (:lexeme token) value)
   state)
 
 (defn- assign-var [state token value]
@@ -122,6 +123,41 @@
   [state expr]
   (evaluate state (:expr expr)))
 
+
+(defn- declare-args [state params args]
+  (reduce
+   (fn [s [p a]]
+     (declare-var s p a))
+   state
+   (zipmap params args)))
+
+(defn- execute-block [state stmts]
+  (-> state
+      (eval-stmts stmts)
+      (assoc :result nil)))
+
+
+(defrecord LoxFunction [decl]
+  callable/LoxCallable
+
+  (arity [this]
+    (-> this :decl :params count))
+
+  (call [this state args]
+    (-> state
+        (update :env env/scope-push)
+        (declare-args (-> this :decl :params) args)
+        (execute-block (-> this :decl :body))
+        (update :env env/scope-pop)))
+
+  (to-string [this]
+    (format "<fn %s>" (-> this :decl :token :lexeme))))
+
+
+(defmethod evaluate :func-decl
+  [state stmt]
+  (declare-var state (:token stmt) (->LoxFunction stmt)))
+
 (defmethod evaluate :grouping
   [state expr]
   (evaluate state (:expr expr)))
@@ -148,10 +184,19 @@
       (and (= :and op-type) (not (truthy? l))) state'
       :else (evaluate state' right))))
 
+(defn- prettify [v]
+  (cond
+    (instance? Double v) (let [s (str v)]
+                           (if (str/ends-with? s ".0")
+                             (subs s 0 (- (count s) 2))
+                             s))
+    (satisfies? callable/LoxCallable v) (callable/to-string v)
+    :else v))
+
 (defmethod evaluate :print-stmt
   [state expr]
   (let [state' (evaluate state (:expr expr))]
-    (println (:result state'))
+    (println (prettify (:result state')))
     (assoc state' :result nil)))
 
 (defmethod evaluate :var-decl
@@ -160,7 +205,7 @@
                  (evaluate state init)
                  (assoc state :result nil))]
     (-> state'
-        (declare-var (:lexeme token) (:result state'))
+        (declare-var token (:result state'))
         (assoc :result nil))))
 
 (defmethod evaluate :variable
