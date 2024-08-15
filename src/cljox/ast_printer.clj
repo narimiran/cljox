@@ -87,6 +87,9 @@
   [token]
   (:lexeme token))
 
+(defmethod pprint :return-stmt
+  [{:keys [value]}]
+  (str "return " (pprint value)))
 
 
 

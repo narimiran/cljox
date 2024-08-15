@@ -131,13 +131,16 @@
    state
    (zipmap params args)))
 
-(defn- execute-block [state stmts]
-  (-> state
-      (eval-stmts stmts)
-      (assoc :result nil)))
+(defn- execute-func-body [state stmts]
+  (try
+    (-> state
+        (eval-stmts stmts)
+        (assoc :result nil))
+    (catch clojure.lang.ExceptionInfo e
+      (:state (ex-data e)))))
 
 
-(defrecord LoxFunction [decl]
+(defrecord LoxFunction [decl closure]
   callable/LoxCallable
 
   (arity [this]
@@ -145,9 +148,9 @@
 
   (call [this state args]
     (-> state
-        (update :env env/scope-push)
+        (assoc :env (env/scope-push (:closure this)))
         (declare-args (-> this :decl :params) args)
-        (execute-block (-> this :decl :body))
+        (execute-func-body (-> this :decl :body))
         (update :env env/scope-pop)))
 
   (to-string [this]
@@ -156,7 +159,7 @@
 
 (defmethod evaluate :func-decl
   [state stmt]
-  (declare-var state (:token stmt) (->LoxFunction stmt)))
+  (declare-var state (:token stmt) (->LoxFunction stmt (:env state))))
 
 (defmethod evaluate :grouping
   [state expr]
@@ -198,6 +201,13 @@
   (let [state' (evaluate state (:expr expr))]
     (println (prettify (:result state')))
     (assoc state' :result nil)))
+
+(defmethod evaluate :return-stmt
+  [state {:keys [value]}]
+  (let [state' (if (nil? value)
+                 (assoc state :result nil)
+                 (evaluate state value))]
+    (throw (ex-info "return statement" {:state state'}))))
 
 (defmethod evaluate :var-decl
   [state {:keys [token init]}]

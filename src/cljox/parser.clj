@@ -24,6 +24,7 @@
 ;;                | forStmt
 ;;                | ifStmt
 ;;                | printStmt
+;;                | returnStmt
 ;;                | whileStmt
 ;;                | block ;
 ;;
@@ -34,6 +35,7 @@
 ;; ifStmt         → "if" "(" expression ")" statement
 ;;                ( "else" statement )? ;
 ;; printStmt      → "print" expression ";" ;
+;; returnStmt     → "return" expression? ";" ;
 ;; whileStmt      → "while" "(" expression ")" statement ;
 ;; block          → "{" declaration* "}" ;
 ;;
@@ -239,6 +241,15 @@
     (add-expr (or else-branch then-branch)
               (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
 
+(defn- return-stmt [parser]
+  (let [kword (current-token parser)
+        parser' (advance parser)
+        val-pars (if (matches? parser' :semicolon)
+                   (assoc parser' :expr nil)
+                   (expression parser'))
+        semi (consume val-pars :semicolon "expected ';' after return value")]
+    (add-expr semi (ast/return-stmt kword (:expr semi)))))
+
 (defn- while-stmt [parser]
   (let [l-par (consume (advance parser) :left-paren "expected '(' after 'while'")
         condition (expression l-par)
@@ -310,11 +321,12 @@
 
 (defn- statement [parser]
   (cond
-    (matches? parser :print) (print-stmt parser)
     (matches? parser :for) (for-loop parser)
     (matches? parser :if) (if-stmt parser)
-    (matches? parser :while) (while-stmt parser)
     (matches? parser :left-brace) (block (advance parser))
+    (matches? parser :print) (print-stmt parser)
+    (matches? parser :return) (return-stmt parser)
+    (matches? parser :while) (while-stmt parser)
     :else (expression-stmt parser)))
 
 (defn- declaration [parser]
@@ -421,4 +433,5 @@
   (testing "average(1)(2)(3);")
   (testing "clock();")
 
-  (testing "fun foo(a, b) {print a + b;}"))
+  (testing "fun foo(a, b) {print a + b;}")
+  (testing "fun foo(a, b) {return a + b;}"))

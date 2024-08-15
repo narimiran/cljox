@@ -56,6 +56,11 @@
   {:type :print-stmt
    :expr expr})
 
+(defn return-stmt [kword value]
+  {:type :return-stmt
+   :kword kword
+   :value value})
+
 (defn unary [operator right]
   {:type :unary
    :operator operator
