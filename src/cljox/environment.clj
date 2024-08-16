@@ -17,21 +17,22 @@
   (swap! env assoc name value)
   env)
 
+(defn go-up [env dist]
+  (if (zero? dist)
+    env
+    (recur (:enclosing @env) (dec dist))))
+
 (defn get-var [env token]
   (let [lex (:lexeme token)]
     (if (contains? @env lex) ; it can exist and be `nil`
       (@env lex)
-      (if-let [enclosing (:enclosing @env)]
-        (get-var enclosing token)
-        (throw-error token (str "undefined variable '" (:lexeme token) "'"))))))
+      (throw-error token (format "undefined variable '%s'" lex)))))
 
 (defn assign! [env token value]
-  (let [name (:lexeme token)]
-    (if (contains? @env name)
-      (declare-name! env name value)
-      (if-let [enclosing (:enclosing @env)]
-        (assign! enclosing token value)
-        (throw-error token (str "undefined variable '" (:lexeme token) "'"))))))
+  (let [lex (:lexeme token)]
+    (if (contains? @env lex)
+      (declare-name! env lex value)
+      (throw-error token (format "undefined variable '%s'" lex)))))
 
 (defn scope-push [env]
   (atom {:enclosing env}))

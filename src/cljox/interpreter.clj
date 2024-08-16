@@ -17,9 +17,22 @@
   (env/declare-name! (:env state) (:lexeme token) value)
   state)
 
-(defn- assign-var [state token value]
-  (env/assign! (:env state) token value)
+(defn- assign-var [{:keys [locals globals env] :as state}
+                   token expr value]
+  (env/assign! (if-let [dist (locals expr)]
+                 (env/go-up env dist)
+                 globals)
+               token
+               value)
   state)
+
+(defn- lookup-var [{:keys [locals globals env] :as state}
+                   token expr]
+  (assoc state :result
+         (env/get-var (if-let [dist (locals expr)]
+                        (env/go-up env dist)
+                        globals)
+                      token)))
 
 (defn- truthy? [v]
   (cond
@@ -62,9 +75,9 @@
 
 
 (defmethod evaluate :assignment
-  [state {:keys [token value]}]
+  [state {:keys [token value] :as asgn}]
   (let [state' (evaluate state value)]
-    (assign-var state' token (:result state'))))
+    (assign-var state' token asgn (:result state'))))
 
 
 (defmethod evaluate :binary
@@ -147,11 +160,12 @@
     (-> this :decl :params count))
 
   (call [this state args]
-    (-> state
-        (assoc :env (env/scope-push (:closure this)))
-        (declare-args (-> this :decl :params) args)
-        (execute-func-body (-> this :decl :body))
-        (update :env env/scope-pop)))
+    (let [current-env (:env state)]
+      (-> state
+          (assoc :env (env/scope-push (:closure this)))
+          (declare-args (-> this :decl :params) args)
+          (execute-func-body (-> this :decl :body))
+          (assoc :env current-env))))
 
   (to-string [this]
     (format "<fn %s>" (-> this :decl :token :lexeme))))
@@ -196,11 +210,15 @@
     (satisfies? callable/LoxCallable v) (callable/to-string v)
     :else v))
 
+(defn- print-result [state]
+  (println (prettify (:result state)))
+  (assoc state :result nil))
+
 (defmethod evaluate :print-stmt
-  [state expr]
-  (let [state' (evaluate state (:expr expr))]
-    (println (prettify (:result state')))
-    (assoc state' :result nil)))
+  [state {:keys [expr]}]
+  (-> state
+      (evaluate expr)
+      print-result))
 
 (defmethod evaluate :return-stmt
   [state {:keys [value]}]
@@ -219,8 +237,8 @@
         (assoc :result nil))))
 
 (defmethod evaluate :variable
-  [state {:keys [token]}]
-  (assoc state :result (env/get-var (:env state) token)))
+  [state var]
+  (lookup-var state (:token var) var))
 
 (defmethod evaluate :while-stmt
   [state {:keys [cnd body] :as while}]
@@ -248,23 +266,21 @@
 (def natives
   {"clock" clock})
 
-(defn- new-state []
+(defn new-interpreter []
   (let [globals (env/new-env natives)]
     {:env     globals
      :globals globals
+     :locals  {}
      :result  nil
      :errors  []}))
 
 
-(defn interpret [stmts]
-  (-> (reduce (fn [state stmt]
-                (try
-                  (evaluate state stmt)
-                  (catch clojure.lang.ExceptionInfo e
-                    (err/print-errors [(ex-data e)])
-                    (-> state
-                        (update :errors conj (ex-data e))
-                        (assoc :result nil)))))
-              (new-state)
-              stmts)
-      :result))
+(defn interpret [state stmts locals]
+  (try
+    (-> state
+        (update :locals merge locals)
+        (eval-stmts stmts))
+    (catch clojure.lang.ExceptionInfo e
+      (-> state
+          (update :errors conj (ex-data e))
+          (assoc :result nil)))))

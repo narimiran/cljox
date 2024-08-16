@@ -186,8 +186,9 @@
 (defn scan-tokens [source]
   (loop [scanner (new-scanner source)]
     (if (at-end? scanner)
-      (let [sc (add-token scanner :eof)]
-        [(:tokens sc) (:errors sc)])
+      (-> scanner
+          (add-token :eof)
+          ((juxt :tokens :errors)))
       (recur (-> scanner
                  scan-token
                  next-token)))))
