@@ -132,6 +132,31 @@
       :else
       (callable/call calee' state'' args'))))
 
+
+
+(defrecord LoxInstance [klass])
+
+(defrecord LoxClass [name methods]
+  callable/LoxCallable
+
+  (arity [_] 0)
+
+  (call [this state _]
+    (let [instance (->LoxInstance this)]
+      (assoc state :result instance)))
+
+  (to-string [this]
+    (:name this)))
+
+
+(defmethod evaluate :class-stmt
+  [state {:keys [token methods]}]
+  (let [name (:lexeme token)
+        klass (->LoxClass name methods)]
+    (declare-var state token klass)))
+
+
+
 (defmethod evaluate :expr-stmt
   [state expr]
   (evaluate state (:expr expr)))
@@ -207,6 +232,7 @@
                            (if (str/ends-with? s ".0")
                              (subs s 0 (- (count s) 2))
                              s))
+    (instance? LoxInstance v) (str (-> v :klass :name) " instance")
     (satisfies? callable/LoxCallable v) (callable/to-string v)
     :else v))
 

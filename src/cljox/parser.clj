@@ -9,11 +9,14 @@
 
 ;; program        → declaration* EOF ;
 ;;
-;; declaration    → funDecl
+;; declaration    → classDecl
+;;                | funDecl
 ;;                | varDecl
 ;;                | statement ;
 ;;
+;; classDecl      → "class" IDENTIFIER "{" function* "}" ;
 ;; funDecl        → "fun" function ;
+;;
 ;; function       → IDENTIFIER "(" parameters? ")" block ;
 ;;
 ;; parameters     → IDENTIFIER ( "," IDENTIFIER )* ;
@@ -318,6 +321,18 @@
     (add-expr body (ast/func-decl name-token (:expr params) stmts))))
 
 
+(defn- class-decl [parser]
+  (let [name-token (current-token parser)
+        cl-name (consume parser :identifier "expected class name")
+        l-brace (consume cl-name :left-brace "expected '{' before class body")]
+    (loop [p l-brace
+           methods []]
+      (if (or (at-end? p) (matches? p :right-brace))
+        (let [r-brace (consume p :right-brace "expected '}' after class body")]
+          (add-expr r-brace (ast/class-stmt name-token methods)))
+        (let [p' (func-decl p :method)]
+          (recur p' (conj methods (:expr p'))))))))
+
 
 (defn- statement [parser]
   (cond
@@ -329,15 +344,6 @@
     (matches? parser :while) (while-stmt parser)
     :else (expression-stmt parser)))
 
-(defn- declaration [parser]
-  (cond
-    (matches? parser :var) (var-decl (advance parser))
-    (matches? parser :fun) (func-decl (advance parser) :func)
-    :else (statement parser)))
-
-
-
-
 (defn- synchronize [parser]
   (cond
     (at-end? parser) parser
@@ -346,16 +352,25 @@
     :else (recur (advance parser))))
 
 
+(defn- declaration [parser]
+  (try
+    (cond
+      (matches? parser :class) (class-decl (advance parser))
+      (matches? parser :fun) (func-decl (advance parser) :func)
+      (matches? parser :var) (var-decl (advance parser))
+      :else (statement parser))
+    (catch clojure.lang.ExceptionInfo e
+      (synchronize (ex-data e)))))
+
+
+
 (defn parse [tokens]
   (loop [parser (new-parser tokens)]
     (if (at-end? parser)
       ((juxt :stmts :errors) parser)
       (recur
-       (try
-         (let [parser' (declaration parser)]
-           (update parser' :stmts conj (:expr parser')))
-         (catch clojure.lang.ExceptionInfo e
-           (synchronize (ex-data e))))))))
+       (let [parser' (declaration parser)]
+         (update parser' :stmts conj (:expr parser')))))))
 
 
 

@@ -90,6 +90,12 @@
   (let [sc' (semcheck sc calee)]
     (reduce semcheck sc' args)))
 
+(defmethod semcheck :class-stmt
+  [sc {:keys [token]}]
+  (-> sc
+      (declare-tok token)
+      (define-tok token)))
+
 (defmethod semcheck :expr-stmt
   [sc {:keys [expr]}]
   (semcheck sc expr))
