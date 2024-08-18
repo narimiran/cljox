@@ -99,9 +99,14 @@
 (defmethod semcheck :class-stmt
   [sc {:keys [token methods]}]
   (-> sc
+      (update :class-stack conj token)
       (declare-tok token)
       (define-tok token)
-      (resolve-methods methods)))
+      begin-scope
+      (add-to-scope "this" true)
+      (resolve-methods methods)
+      end-scope
+      (update :class-stack pop)))
 
 (defmethod semcheck :expr-stmt
   [sc {:keys [expr]}]
@@ -156,6 +161,12 @@
       (semcheck value)
       (semcheck object)))
 
+(defmethod semcheck :this
+  [sc {:keys [kword] :as this}]
+  (if (empty? (:class-stack sc))
+    (add-error sc kword "can't use 'this' outside of a class")
+    (resolve-local sc this (:lexeme kword))))
+
 (defmethod semcheck :unary
   [sc {:keys [right]}]
   (semcheck sc right))
@@ -186,7 +197,8 @@
   {:locals {}
    :errors []
    :scopes '()
-   :func-stack '()})
+   :func-stack '()
+   :class-stack '()})
 
 
 (defn resolve-locals [stmts]

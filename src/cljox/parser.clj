@@ -55,7 +55,7 @@
 ;; unary          → ( "!" | "-" ) unary | call ;
 ;; call           → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
 ;; arguments      → expression ( "," expression )* ;
-;; primary        → "true" | "false" | "nil"
+;; primary        → "true" | "false" | "nil" | "this"
 ;;                | NUMBER | STRING
 ;;                "(" expression ")"
 ;;                | IDENTIFIER ;
@@ -130,6 +130,9 @@
 
     (matches? parser #{:number :string})
     (add-literal parser (:literal (current-token parser)))
+
+    (matches? parser :this)
+    (add-expr (advance parser) (ast/this (current-token parser)))
 
     (matches? parser :identifier)
     (add-identifier parser (current-token parser))

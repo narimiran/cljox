@@ -1,12 +1,22 @@
 (ns cljox.interpreter
   (:require [clojure.string :as str]
             [cljox.error :as err]
-            [cljox.environment :as env]
-            [cljox.callable :as callable]))
+            [cljox.environment :as env]))
 
 
 (defmulti evaluate
   (fn [_ m] (:type m)))
+
+(defprotocol LoxCallable
+  (arity [this])
+  (call [this state args])
+  (to-string [this]))
+
+(defprotocol ProtoInstance
+  (method-bind [this method-func])
+  (getter [this token])
+  (setter! [this token value]))
+
 
 
 (defn- throw-error [token msg]
@@ -123,47 +133,15 @@
         state'' (eval-args state' args)
         args' (:result state'')]
     (cond
-      (not (satisfies? callable/LoxCallable calee'))
+      (not (satisfies? LoxCallable calee'))
       (throw-error paren "can only call functions and classes")
 
-      (not= (callable/arity calee') (count args'))
+      (not= (arity calee') (count args'))
       (throw-error paren (format "expected %d arguments, but got %d"
-                                 (callable/arity calee') (count args')))
+                                 (arity calee') (count args')))
       :else
-      (callable/call calee' state'' args'))))
+      (call calee' state'' args'))))
 
-
-
-(defrecord LoxInstance [klass fields])
-
-(defn- find-method [klass name]
-  ((:methods klass) name))
-
-(defn- getter [object token]
-  (let [name (:lexeme token)
-        fields @(:fields object)]
-    (if-let [field-name (fields name)]
-      field-name
-      (if-let [method-name (find-method (:klass object) name)]
-        method-name
-        (throw-error token (format "undefined property '%s'" name))))))
-
-(defn- setter! [object token value]
-  (let [name (:lexeme token)]
-    (swap! (:fields object) assoc name value)))
-
-
-(defrecord LoxClass [name methods]
-  callable/LoxCallable
-
-  (arity [_] 0)
-
-  (call [this state _]
-    (let [instance (->LoxInstance this (atom {}))]
-      (assoc state :result instance)))
-
-  (to-string [this]
-    (:name this)))
 
 
 (defn- declare-args [state params args]
@@ -183,7 +161,7 @@
 
 
 (defrecord LoxFunction [decl closure]
-  callable/LoxCallable
+  LoxCallable
 
   (arity [this]
     (-> this :decl :params count))
@@ -200,6 +178,40 @@
     (format "<fn %s>" (-> this :decl :token :lexeme))))
 
 
+(defrecord LoxInstance [klass fields]
+  ProtoInstance
+
+  (method-bind [this {:keys [decl closure]}]
+    (let [env (env/scope-push closure)]
+      (env/declare-name! env "this" this)
+      (->LoxFunction decl env)))
+
+  (getter [this token]
+    (let [name (:lexeme token)
+          fields @(:fields this)]
+      (if-let [field-name (fields name)]
+        field-name
+        (if-let [method-func ((-> this :klass :methods) name)]
+          (method-bind this method-func)
+          (throw-error token (format "undefined property '%s'" name))))))
+
+  (setter! [this token value]
+    (let [name (:lexeme token)]
+      (swap! (:fields this) assoc name value))))
+
+
+(defrecord LoxClass [name methods]
+  LoxCallable
+
+  (arity [_] 0)
+
+  (call [this state _]
+    (let [instance (->LoxInstance this (atom {}))]
+      (assoc state :result instance)))
+
+  (to-string [this]
+    (:name this)))
+
 
 (defn- create-methods [env methods]
   (reduce (fn [acc method]
@@ -215,6 +227,7 @@
         methods (create-methods (:env state) methods)
         klass (->LoxClass name methods)]
     (declare-var state token klass)))
+
 
 (defmethod evaluate :expr-stmt
   [state expr]
@@ -265,7 +278,7 @@
                              (subs s 0 (- (count s) 2))
                              s))
     (instance? LoxInstance v) (str (-> v :klass :name) " instance")
-    (satisfies? callable/LoxCallable v) (callable/to-string v)
+    (satisfies? LoxCallable v) (to-string v)
     :else v))
 
 (defn- print-result [state]
@@ -295,6 +308,10 @@
         (setter! obj token v)
         state'')
       (throw-error token "only instances have fields"))))
+
+(defmethod evaluate :this
+  [state expr]
+  (lookup-var state (:kword expr) expr))
 
 (defmethod evaluate :var-decl
   [state {:keys [token init]}]
@@ -326,7 +343,7 @@
              :bang  (not (truthy? value))))))
 
 (def clock
-  (reify callable/LoxCallable
+  (reify LoxCallable
     (arity [_] 0)
     (call [_ state _]
       (assoc state :result (/ (System/currentTimeMillis) 1000.0)))

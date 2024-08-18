@@ -77,6 +77,10 @@
    :token token
    :value value})
 
+(defn this [kword]
+  {:type :this
+   :kword kword})
+
 (defn unary [operator right]
   {:type :unary
    :operator operator
