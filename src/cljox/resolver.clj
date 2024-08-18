@@ -64,6 +64,12 @@
       end-scope
       (update :func-stack pop)))
 
+(defn- resolve-methods [sc methods]
+  (reduce (fn [sc method]
+            (resolve-func sc method :method))
+          sc
+          methods))
+
 
 
 (defmethod semcheck :assignment
@@ -91,10 +97,11 @@
     (reduce semcheck sc' args)))
 
 (defmethod semcheck :class-stmt
-  [sc {:keys [token]}]
+  [sc {:keys [token methods]}]
   (-> sc
       (declare-tok token)
-      (define-tok token)))
+      (define-tok token)
+      (resolve-methods methods)))
 
 (defmethod semcheck :expr-stmt
   [sc {:keys [expr]}]

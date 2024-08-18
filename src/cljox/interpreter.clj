@@ -136,12 +136,17 @@
 
 (defrecord LoxInstance [klass fields])
 
+(defn- find-method [klass name]
+  ((:methods klass) name))
+
 (defn- getter [object token]
   (let [name (:lexeme token)
         fields @(:fields object)]
-    (if (contains? fields name)
-      (fields name)
-      (throw-error token (format "undefined property '%s'" name)))))
+    (if-let [field-name (fields name)]
+      field-name
+      (if-let [method-name (find-method (:klass object) name)]
+        method-name
+        (throw-error token (format "undefined property '%s'" name))))))
 
 (defn- setter! [object token value]
   (let [name (:lexeme token)]
@@ -159,19 +164,6 @@
 
   (to-string [this]
     (:name this)))
-
-
-(defmethod evaluate :class-stmt
-  [state {:keys [token methods]}]
-  (let [name (:lexeme token)
-        klass (->LoxClass name methods)]
-    (declare-var state token klass)))
-
-
-
-(defmethod evaluate :expr-stmt
-  [state expr]
-  (evaluate state (:expr expr)))
 
 
 (defn- declare-args [state params args]
@@ -207,6 +199,26 @@
   (to-string [this]
     (format "<fn %s>" (-> this :decl :token :lexeme))))
 
+
+
+(defn- create-methods [env methods]
+  (reduce (fn [acc method]
+            (let [method-name (-> method :token :lexeme)
+                  method-func (->LoxFunction method env)]
+              (conj acc {method-name method-func})))
+          {}
+          methods))
+
+(defmethod evaluate :class-stmt
+  [state {:keys [token methods]}]
+  (let [name (:lexeme token)
+        methods (create-methods (:env state) methods)
+        klass (->LoxClass name methods)]
+    (declare-var state token klass)))
+
+(defmethod evaluate :expr-stmt
+  [state expr]
+  (evaluate state (:expr expr)))
 
 (defmethod evaluate :func-decl
   [state stmt]
