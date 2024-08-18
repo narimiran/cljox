@@ -66,7 +66,10 @@
 
 (defn- resolve-methods [sc methods]
   (reduce (fn [sc method]
-            (resolve-func sc method :method))
+            (let [func-type (if (= "init" (-> method :token :lexeme))
+                              :init
+                              :method)]
+              (resolve-func sc method func-type)))
           sc
           methods))
 
@@ -152,7 +155,9 @@
   [sc {:keys [kword value]}]
   (cond
     (empty? (:func-stack sc)) (add-error sc kword "can't return from top-level code")
-    (some? value) (semcheck sc value)
+    (some? value) (if (= :init (peek (:func-stack sc)))
+                    (add-error sc kword "can't return a value from an initializer")
+                    (semcheck sc value))
     :else sc))
 
 (defmethod semcheck :set-expr

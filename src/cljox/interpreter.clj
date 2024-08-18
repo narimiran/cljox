@@ -151,16 +151,20 @@
    state
    (zipmap params args)))
 
-(defn- execute-func-body [state stmts]
+(defn- execute-func-body [state {:keys [decl closure init?]}]
   (try
     (-> state
-        (eval-stmts stmts)
-        (assoc :result nil))
+        (eval-stmts (:body decl))
+        (assoc :result (when init? (@closure "this"))))
     (catch clojure.lang.ExceptionInfo e
-      (:state (ex-data e)))))
+      (if (= "return statement" (ex-message e))
+        (if init?
+          (assoc state :result (@closure "this"))
+          (:state (ex-data e)))
+        (throw e)))))
 
 
-(defrecord LoxFunction [decl closure]
+(defrecord LoxFunction [decl closure init?]
   LoxCallable
 
   (arity [this]
@@ -171,7 +175,7 @@
       (-> state
           (assoc :env (env/scope-push (:closure this)))
           (declare-args (-> this :decl :params) args)
-          (execute-func-body (-> this :decl :body))
+          (execute-func-body this)
           (assoc :env current-env))))
 
   (to-string [this]
@@ -181,10 +185,10 @@
 (defrecord LoxInstance [klass fields]
   ProtoInstance
 
-  (method-bind [this {:keys [decl closure]}]
+  (method-bind [this {:keys [decl closure init?]}]
     (let [env (env/scope-push closure)]
       (env/declare-name! env "this" this)
-      (->LoxFunction decl env)))
+      (->LoxFunction decl env init?)))
 
   (getter [this token]
     (let [name (:lexeme token)
@@ -203,11 +207,19 @@
 (defrecord LoxClass [name methods]
   LoxCallable
 
-  (arity [_] 0)
+  (arity [this]
+    (if-let [init ((:methods this) "init")]
+      (arity init)
+      0))
 
-  (call [this state _]
-    (let [instance (->LoxInstance this (atom {}))]
-      (assoc state :result instance)))
+  (call [this state args]
+    (let [instance (->LoxInstance this (atom {}))
+          init ((:methods this) "init")
+          state' (if init
+                   (-> (method-bind instance init)
+                       (call state args))
+                   state)]
+      (assoc state' :result instance)))
 
   (to-string [this]
     (:name this)))
@@ -216,7 +228,7 @@
 (defn- create-methods [env methods]
   (reduce (fn [acc method]
             (let [method-name (-> method :token :lexeme)
-                  method-func (->LoxFunction method env)]
+                  method-func (->LoxFunction method env (= "init" method-name))]
               (conj acc {method-name method-func})))
           {}
           methods))
@@ -235,7 +247,7 @@
 
 (defmethod evaluate :func-decl
   [state stmt]
-  (declare-var state (:token stmt) (->LoxFunction stmt (:env state))))
+  (declare-var state (:token stmt) (->LoxFunction stmt (:env state) false)))
 
 (defmethod evaluate :get-expr
   [state {:keys [object token]}]
