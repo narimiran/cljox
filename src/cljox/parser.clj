@@ -57,9 +57,8 @@
 ;; call           → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
 ;; arguments      → expression ( "," expression )* ;
 ;; primary        → "true" | "false" | "nil" | "this"
-;;                | NUMBER | STRING
-;;                "(" expression ")"
-;;                | IDENTIFIER ;
+;;                | NUMBER | STRING | IDENTIFIER | "(" expression ")"
+;;                | "super" "." IDENTIFIER ;
 
 
 
@@ -131,6 +130,13 @@
 
     (matches? parser #{:number :string})
     (add-literal parser (:literal (current-token parser)))
+
+    (matches? parser :super)
+    (let [kword (current-token parser)
+          dot-par (consume (advance parser) :dot "expected '.' after 'super'")
+          method (current-token dot-par)
+          ident-par (consume dot-par :identifier "expected superclass method name")]
+      (add-expr ident-par (ast/super kword method)))
 
     (matches? parser :this)
     (add-expr (advance parser) (ast/this (current-token parser)))

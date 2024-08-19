@@ -250,7 +250,12 @@
   (let [name (:lexeme token)
         state' (eval-superclass state super)
         superclass (:result state')
-        methods (create-methods (:env state) methods)
+        curr-env (:env state')
+        new-env (if super
+                  (-> (env/scope-push curr-env)
+                      (env/declare-name! "super" superclass))
+                  curr-env)
+        methods (create-methods new-env methods)
         klass (->LoxClass name superclass methods)]
     (declare-var state' token klass)))
 
@@ -334,6 +339,18 @@
         (setter! obj token v)
         state'')
       (throw-error token "only instances have fields"))))
+
+(defmethod evaluate :super
+  [state expr]
+  (let [dist ((:locals state) expr)
+        ob-env (env/go-up (:env state) (dec dist))
+        object (@ob-env "this")
+        sc-env (env/go-up ob-env 1)
+        superclass (@sc-env "super")
+        name (-> expr :method :lexeme)]
+    (if-let [method (find-method superclass name)]
+      (assoc state :result (method-bind object method))
+      (throw-error (:method expr) (format "undefined property '%s'" name)))))
 
 (defmethod evaluate :this
   [state expr]

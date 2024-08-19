@@ -73,10 +73,11 @@
           sc
           methods))
 
-(defn- resolve-superclass [sc super token]
-  (if (= (:lexeme token) (-> super :token :lexeme))
-    (add-error sc (:token super) "a class can't inherit from itself")
-    (semcheck sc super)))
+(defn- resolve-superclass [sc super]
+  (-> sc
+      (semcheck super)
+      begin-scope
+      (add-to-scope "super" true)))
 
 
 
@@ -106,16 +107,20 @@
 
 (defmethod semcheck :class-stmt
   [sc {:keys [token super methods]}]
-  (-> sc
-      (update :class-stack conj token)
-      (declare-tok token)
-      (define-tok token)
-      (cond-> super (resolve-superclass super token))
-      begin-scope
-      (add-to-scope "this" true)
-      (resolve-methods methods)
-      end-scope
-      (update :class-stack pop)))
+  (if (and super
+           (= (:lexeme token) (-> super :token :lexeme)))
+    (add-error sc (:token super) "a class can't inherit from itself")
+    (-> sc
+        (update :class-stack conj (if super :subclass :class))
+        (declare-tok token)
+        (define-tok token)
+        (cond-> super (resolve-superclass super))
+        begin-scope
+        (add-to-scope "this" true)
+        (resolve-methods methods)
+        end-scope
+        (cond-> super end-scope)
+        (update :class-stack pop))))
 
 (defmethod semcheck :expr-stmt
   [sc {:keys [expr]}]
@@ -171,6 +176,13 @@
   (-> sc
       (semcheck value)
       (semcheck object)))
+
+(defmethod semcheck :super
+  [sc super]
+  (case (peek (:class-stack sc))
+    :subclass (resolve-local sc super (-> super :kword :lexeme))
+    :class (add-error sc (:kword super) "can't use 'super' in a class with no superclass")
+    nil (add-error sc (:kword super) "can't use 'super' outside of a class")))
 
 (defmethod semcheck :this
   [sc {:keys [kword] :as this}]

@@ -78,6 +78,11 @@
    :token token
    :value value})
 
+(defn super [kword method]
+  {:type :super
+   :kword kword
+   :method method})
+
 (defn this [kword]
   {:type :this
    :kword kword})
