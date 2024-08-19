@@ -73,6 +73,11 @@
           sc
           methods))
 
+(defn- resolve-superclass [sc super token]
+  (if (= (:lexeme token) (-> super :token :lexeme))
+    (add-error sc (:token super) "a class can't inherit from itself")
+    (semcheck sc super)))
+
 
 
 (defmethod semcheck :assignment
@@ -100,11 +105,12 @@
     (reduce semcheck sc' args)))
 
 (defmethod semcheck :class-stmt
-  [sc {:keys [token methods]}]
+  [sc {:keys [token super methods]}]
   (-> sc
       (update :class-stack conj token)
       (declare-tok token)
       (define-tok token)
+      (cond-> super (resolve-superclass super token))
       begin-scope
       (add-to-scope "this" true)
       (resolve-methods methods)

@@ -163,6 +163,11 @@
           (:state (ex-data e)))
         (throw e)))))
 
+(defn- find-method [{:keys [methods super]} name]
+  (if-let [method (methods name)]
+    method
+    (when super
+      (recur super name))))
 
 (defrecord LoxFunction [decl closure init?]
   LoxCallable
@@ -193,9 +198,9 @@
   (getter [this token]
     (let [name (:lexeme token)
           fields @(:fields this)]
-      (if-let [field-name (fields name)]
-        field-name
-        (if-let [method-func ((-> this :klass :methods) name)]
+      (if (contains? fields name) ; it can exist and be `nil`
+        (fields name)
+        (if-let [method-func (find-method (:klass this) name)]
           (method-bind this method-func)
           (throw-error token (format "undefined property '%s'" name))))))
 
@@ -204,17 +209,17 @@
       (swap! (:fields this) assoc name value))))
 
 
-(defrecord LoxClass [name methods]
+(defrecord LoxClass [name super methods]
   LoxCallable
 
   (arity [this]
-    (if-let [init ((:methods this) "init")]
+    (if-let [init (find-method this "init")]
       (arity init)
       0))
 
   (call [this state args]
     (let [instance (->LoxInstance this (atom {}))
-          init ((:methods this) "init")
+          init (find-method this "init")
           state' (if init
                    (-> (method-bind instance init)
                        (call state args))
@@ -224,6 +229,13 @@
   (to-string [this]
     (:name this)))
 
+(defn- eval-superclass [state super]
+  (if super
+    (let [state' (evaluate state super)]
+      (if (instance? LoxClass (:result state'))
+        state'
+        (throw-error (:token super) "superclass must be a class")))
+    (assoc state :result nil)))
 
 (defn- create-methods [env methods]
   (reduce (fn [acc method]
@@ -234,11 +246,13 @@
           methods))
 
 (defmethod evaluate :class-stmt
-  [state {:keys [token methods]}]
+  [state {:keys [token super methods]}]
   (let [name (:lexeme token)
+        state' (eval-superclass state super)
+        superclass (:result state')
         methods (create-methods (:env state) methods)
-        klass (->LoxClass name methods)]
-    (declare-var state token klass)))
+        klass (->LoxClass name superclass methods)]
+    (declare-var state' token klass)))
 
 
 (defmethod evaluate :expr-stmt

@@ -14,7 +14,8 @@
 ;;                | varDecl
 ;;                | statement ;
 ;;
-;; classDecl      → "class" IDENTIFIER "{" function* "}" ;
+;; classDecl      → "class" IDENTIFIER ( "<" IDENTIFIER )?
+;;                 "{" function* "}" ]));
 ;; funDecl        → "fun" function ;
 ;;
 ;; function       → IDENTIFIER "(" parameters? ")" block ;
@@ -342,12 +343,17 @@
 (defn- class-decl [parser]
   (let [name-token (current-token parser)
         cl-name (consume parser :identifier "expected class name")
-        l-brace (consume cl-name :left-brace "expected '{' before class body")]
+        super? (matches? cl-name :less)
+        super (if super?
+                (consume (advance cl-name) :identifier "expected superclass name")
+                cl-name)
+        superclass (when super? (ast/variable (current-token (advance cl-name))))
+        l-brace (consume super :left-brace "expected '{' before class body")]
     (loop [p l-brace
            methods []]
       (if (or (at-end? p) (matches? p :right-brace))
         (let [r-brace (consume p :right-brace "expected '}' after class body")]
-          (add-expr r-brace (ast/class-stmt name-token methods)))
+          (add-expr r-brace (ast/class-stmt name-token superclass methods)))
         (let [p' (func-decl p :method)]
           (recur p' (conj methods (:expr p'))))))))
 

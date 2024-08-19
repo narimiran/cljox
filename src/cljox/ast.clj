@@ -22,9 +22,10 @@
    :paren paren
    :args arguments})
 
-(defn class-stmt [token methods]
+(defn class-stmt [token superclass methods]
   {:type :class-stmt
    :token token
+   :super superclass
    :methods methods})
 
 (defn expr-stmt [expr]
