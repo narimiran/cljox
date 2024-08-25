@@ -6,7 +6,7 @@
 ;; Grammar
 ;; =======
 ;;
-
+;;
 ;; program        → declaration* EOF ;
 ;;
 ;; declaration    → classDecl
@@ -43,7 +43,7 @@
 ;; block          → "{" declaration* "}" ;
 ;;
 ;; expression     → assignment ;
-;; assignment     → IDENTIFIER "=" assignment
+;; assignment     → ( call "." )? IDENTIFIER "=" assignment
 ;;                | logic_or ;
 ;; logic_or       → logic_and ( "or" logic_and )* ;
 ;; logic_and      → equality ( "and" equality )* ;
@@ -53,7 +53,7 @@
 ;; term           → factor ( ( "-" | "+" ) factor )* ;
 ;; factor         → unary ( ( "/" | "*" ) unary )* ;
 ;; unary          → ( "!" | "-" ) unary | call ;
-;; call           → primary ( "(" arguments? ")" )* ;
+;; call           → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
 ;; arguments      → expression ( "," expression )* ;
 ;; primary        → "true" | "false" | "nil"
 ;;                | NUMBER | STRING
@@ -158,8 +158,17 @@
 
 (defn- call [parser]
   (loop [parser (primary parser)]
-    (if (matches? parser :left-paren)
+    (cond
+      (matches? parser :left-paren)
       (recur (finish-call (advance parser) (:expr parser)))
+
+      (matches? parser :dot)
+      (let [parser' (advance parser)
+            name-token (current-token parser')
+            parser'' (consume parser' :identifier "expect property name after '.'")]
+        (recur (add-expr parser'' (ast/get-expr (:expr parser'') name-token))))
+
+      :else
       parser)))
 
 (defn- unary [parser]
@@ -205,8 +214,14 @@
     (if (matches? left :equal)
       (let [right (advance left)
             value (assignment right)]
-        (if (= :variable (:type expr))
-          (add-expr value (ast/assignment (:token expr) (:expr value)))
+        (case (:type expr)
+          :variable (add-expr value (ast/assignment
+                                     (:token expr)
+                                     (:expr value)))
+          :get-expr (add-expr value (ast/set-expr
+                                     (:object expr)
+                                     (:token expr)
+                                     (:expr value)))
           (throw-error left "invalid assignment target")))
       left)))
 

@@ -107,6 +107,10 @@
       (define-tok token)
       (resolve-func node :func)))
 
+(defmethod semcheck :get-expr
+  [sc {:keys [object]}]
+  (semcheck sc object))
+
 (defmethod semcheck :grouping
   [sc {:keys [expr]}]
   (semcheck sc expr))
@@ -138,6 +142,12 @@
     (empty? (:func-stack sc)) (add-error sc kword "can't return from top-level code")
     (some? value) (semcheck sc value)
     :else sc))
+
+(defmethod semcheck :set-expr
+  [sc {:keys [object value]}]
+  (-> sc
+      (semcheck value)
+      (semcheck object)))
 
 (defmethod semcheck :unary
   [sc {:keys [right]}]

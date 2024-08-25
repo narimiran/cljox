@@ -134,7 +134,19 @@
 
 
 
-(defrecord LoxInstance [klass])
+(defrecord LoxInstance [klass fields])
+
+(defn- getter [object token]
+  (let [name (:lexeme token)
+        fields @(:fields object)]
+    (if (contains? fields name)
+      (fields name)
+      (throw-error token (format "undefined property '%s'" name)))))
+
+(defn- setter! [object token value]
+  (let [name (:lexeme token)]
+    (swap! (:fields object) assoc name value)))
+
 
 (defrecord LoxClass [name methods]
   callable/LoxCallable
@@ -142,7 +154,7 @@
   (arity [_] 0)
 
   (call [this state _]
-    (let [instance (->LoxInstance this)]
+    (let [instance (->LoxInstance this (atom {}))]
       (assoc state :result instance)))
 
   (to-string [this]
@@ -200,6 +212,14 @@
   [state stmt]
   (declare-var state (:token stmt) (->LoxFunction stmt (:env state))))
 
+(defmethod evaluate :get-expr
+  [state {:keys [object token]}]
+  (let [state' (evaluate state object)
+        obj (:result state')]
+    (if (instance? LoxInstance obj)
+      (assoc state' :result (getter obj token))
+      (throw-error token "only instances have properties"))))
+
 (defmethod evaluate :grouping
   [state expr]
   (evaluate state (:expr expr)))
@@ -252,6 +272,17 @@
                  (assoc state :result nil)
                  (evaluate state value))]
     (throw (ex-info "return statement" {:state state'}))))
+
+(defmethod evaluate :set-expr
+  [state {:keys [object token value]}]
+  (let [state' (evaluate state object)
+        obj (:result state')]
+    (if (instance? LoxInstance obj)
+      (let [state'' (evaluate state' value)
+            v (:result state'')]
+        (setter! obj token v)
+        state'')
+      (throw-error token "only instances have fields"))))
 
 (defmethod evaluate :var-decl
   [state {:keys [token init]}]

@@ -37,6 +37,11 @@
    :params params
    :body body})
 
+(defn get-expr [object token]
+  {:type :get-expr
+   :object object
+   :token token})
+
 (defn grouping [expr]
   {:type :grouping
    :expr expr})
@@ -64,6 +69,12 @@
 (defn return-stmt [kword value]
   {:type :return-stmt
    :kword kword
+   :value value})
+
+(defn set-expr [object token value]
+  {:type :set-expr
+   :object object
+   :token token
    :value value})
 
 (defn unary [operator right]
