@@ -66,28 +66,23 @@
   {:tokens  tokens
    :errors  []
    :stmts   []
-   :expr    nil
-   :current 0})
+   :expr    nil})
 
 
-(defn- current-token [{:keys [tokens current]}]
-  (nth tokens current))
+(defn- current-token [{:keys [tokens]}]
+  (first tokens))
 
-(defn- current-type [parser]
+(defn- tok-type [parser]
   (:type (current-token parser)))
 
 (defn- advance [m]
-  (update m :current inc))
+  (update m :tokens rest))
+
+(defn- tok-match? [expected parser]
+  (= expected (tok-type parser)))
 
 (defn- at-end? [parser]
-  (= :eof (current-type parser)))
-
-(defn- matches? [parser expected]
-  (and (not (at-end? parser))
-       (if (= clojure.lang.PersistentHashSet (type expected))
-         (expected (current-type parser))
-         (= expected (current-type parser)))))
-
+  (tok-match? :eof parser))
 
 (defn- add-expr [parser expr]
   (assoc parser :expr expr))
@@ -112,7 +107,7 @@
     (throw (ex-info "parsing error" parser'))))
 
 (defn- consume [parser expected msg]
-  (if (matches? parser expected)
+  (if (tok-match? expected parser)
     (advance parser)
     (throw-error parser msg)))
 
@@ -123,66 +118,52 @@
 
 
 (defn- primary [parser]
-  (cond
-    (matches? parser :false) (add-literal parser false)
-    (matches? parser :true)  (add-literal parser true)
-    (matches? parser :nil)   (add-literal parser nil)
-
-    (matches? parser #{:number :string})
-    (add-literal parser (:literal (current-token parser)))
-
-    (matches? parser :super)
-    (let [kword (current-token parser)
-          dot-par (consume (advance parser) :dot "expected '.' after 'super'")
-          method (current-token dot-par)
-          ident-par (consume dot-par :identifier "expected superclass method name")]
-      (add-expr ident-par (ast/super kword method)))
-
-    (matches? parser :this)
-    (add-expr (advance parser) (ast/this (current-token parser)))
-
-    (matches? parser :identifier)
-    (add-identifier parser (current-token parser))
-
-    (matches? parser :left-paren)
-    (let [mid (expression (advance parser))
-          r-par (consume mid :right-paren "expected ')' after expression")]
-      (add-expr r-par (ast/grouping (:expr mid))))
-
-    :else (throw-error parser "expected expression")))
+  (let [tok     (current-token parser)
+        parser' (advance parser)]
+    (case (:type tok)
+      :false      (add-literal parser false)
+      :true       (add-literal parser true)
+      :nil        (add-literal parser nil)
+      (:number :string) (add-literal parser (:literal tok))
+      :super      (let [dot-par   (consume parser' :dot "expected '.' after 'super'")
+                        method    (current-token dot-par)
+                        ident-par (consume dot-par :identifier "expected superclass method name")]
+                    (add-expr ident-par (ast/super tok method)))
+      :this       (add-expr parser' (ast/this tok))
+      :identifier (add-identifier parser tok)
+      :left-paren (let [mid   (expression parser')
+                        r-par (consume mid :right-paren "expected ')' after expression")]
+                    (add-expr r-par (ast/grouping (:expr mid))))
+      (throw-error parser "expected expression"))))
 
 (defn- finish-call [parser calee]
   (loop [parser parser
          args []]
-    (if (matches? parser :right-paren)
-      (add-expr (advance parser) (ast/call calee (current-token parser) args))
-      (let [parser' (expression parser)
-            parser'' (if (>= (count args) 255)
-                       (add-error parser' "cannot have more than 255 arguments")
-                       parser')
-            args' (conj args (:expr parser''))]
-        (if (matches? parser'' :comma)
-          (recur (advance parser'') args')
-          (let [r-par (consume parser'' :right-paren "expect ')' after arguments")]
-            (add-expr r-par (ast/call calee (current-token parser'') args'))))))))
+    (let [tok (current-token parser)]
+      (if (tok-match? :right-paren parser)
+        (add-expr (advance parser) (ast/call calee tok args))
+        (let [parser' (expression parser)
+              parser'' (if (>= (count args) 255)
+                         (add-error parser' "cannot have more than 255 arguments")
+                         parser')
+              args' (conj args (:expr parser''))]
+          (if (tok-match? :comma parser'')
+            (recur (advance parser'') args')
+            (let [r-par (consume parser'' :right-paren "expect ')' after arguments")]
+              (add-expr r-par (ast/call calee (current-token parser'') args')))))))))
 
 (defn- call [parser]
   (loop [parser (primary parser)]
-    (cond
-      (matches? parser :left-paren)
-      (recur (finish-call (advance parser) (:expr parser)))
-
-      (matches? parser :dot)
-      (let [parser' (advance parser)
-            name-token (current-token parser')
-            parser'' (consume parser' :identifier "expect property name after '.'")]
-        (recur (add-expr parser'' (ast/get-expr (:expr parser'') name-token))))
-
-      :else
-      parser)))
+    (let [parser' (advance parser)]
+      (case (tok-type parser)
+        :left-paren (recur (finish-call parser' (:expr parser)))
+        :dot (let [name-token (current-token parser')
+                   parser'' (consume parser' :identifier "expect property name after '.'")]
+               (recur (add-expr parser'' (ast/get-expr (:expr parser'') name-token))))
+        parser))))
 
 (defn- unary [parser]
-  (if (matches? parser #{:bang :minus})
+  (if (#{:bang :minus} (tok-type parser))
     (let [operator (current-token parser)
           right (unary (advance parser))]
       (add-expr right (ast/unary operator (:expr right))))
@@ -194,7 +175,7 @@
    (binary-op parser ast/binary op-method token-types))
   ([parser ast-func op-method token-types]
    (loop [left (op-method parser)]
-     (if (matches? left token-types)
+     (if (token-types (tok-type left))
        (let [operator (current-token left)
              right (op-method (advance left))]
          (recur (add-expr right (ast-func (:expr left) operator (:expr right)))))
@@ -221,7 +202,7 @@
 (defn- assignment [parser]
   (let [left (logic-or parser)
         expr (:expr left)]
-    (if (matches? left :equal)
+    (if (tok-match? :equal left)
       (let [right (advance left)
             value (assignment right)]
         (case (:type expr)
@@ -239,11 +220,11 @@
   (assignment parser))
 
 (defn- var-decl [parser]
-  (let [name (consume parser :identifier "expected variable name")
-        has-init? (matches? name :equal)
+  (let [vname (consume parser :identifier "expected variable name")
+        has-init? (tok-match? :equal vname)
         initializer (if has-init?
-                      (expression (advance name))
-                      name)
+                      (expression (advance vname))
+                      vname)
         semicolon (consume initializer :semicolon "expected ';' after value")]
     (add-expr semicolon
               (ast/var-decl (current-token parser)
@@ -255,31 +236,29 @@
     (add-expr semi (ast/expr-stmt (:expr value)))))
 
 (defn- print-stmt [parser]
-  (let [value (expression (advance parser))
+  (let [value (expression parser)
         semi (consume value :semicolon "expected ';' after value")]
     (add-expr semi (ast/print-stmt (:expr value)))))
 
 (defn- if-stmt [parser]
-  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'if'")
+  (let [l-par (consume parser :left-paren "expected '(' after 'if'")
         condition (expression l-par)
         r-par (consume condition :right-paren "expected ')' after if condition")
         then-branch (statement r-par)
-        else-branch (when (matches? then-branch :else)
+        else-branch (when (tok-match? :else then-branch)
                       (statement (advance then-branch)))]
     (add-expr (or else-branch then-branch)
               (ast/if-stmt (:expr condition) (:expr then-branch) (:expr else-branch)))))
 
-(defn- return-stmt [parser]
-  (let [kword (current-token parser)
-        parser' (advance parser)
-        val-pars (if (matches? parser' :semicolon)
-                   (assoc parser' :expr nil)
-                   (expression parser'))
+(defn- return-stmt [parser kword]
+  (let [val-pars (if (tok-match? :semicolon parser)
+                   (assoc parser :expr nil)
+                   (expression parser))
         semi (consume val-pars :semicolon "expected ';' after return value")]
     (add-expr semi (ast/return-stmt kword (:expr semi)))))
 
 (defn- while-stmt [parser]
-  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'while'")
+  (let [l-par (consume parser :left-paren "expected '(' after 'while'")
         condition (expression l-par)
         r-par (consume condition :right-paren "expected ')' after condition")
         body (statement r-par)]
@@ -287,15 +266,15 @@
               (ast/while-stmt (:expr condition) (:expr body)))))
 
 (defn- for-loop [parser]
-  (let [l-par (consume (advance parser) :left-paren "expected '(' after 'for'")
-        init  (cond
-                (matches? l-par :semicolon) (advance (add-expr l-par nil))
-                (matches? l-par :var) (var-decl (advance l-par))
-                :else (expression-stmt l-par))
-        cnd   (if (matches? init :semicolon)
+  (let [l-par (consume parser :left-paren "expected '(' after 'for'")
+        init  (case (tok-type l-par)
+                :semicolon (advance (add-expr l-par nil))
+                :var (var-decl (advance l-par))
+                (expression-stmt l-par))
+        cnd   (if (tok-match? :semicolon init)
                 (add-literal init true)
                 (expression-stmt init))
-        incr  (if (matches? cnd #{:right-paren})
+        incr  (if (tok-match? :right-paren cnd)
                 (add-expr cnd nil)
                 (expression cnd))
         r-par (consume incr :right-paren "expected ')' after 'for' clause")
@@ -312,7 +291,7 @@
   (loop [parser parser
          stmts []]
     (if (or (at-end? parser)
-            (matches? parser :right-brace))
+            (tok-match? :right-brace parser))
       (let [parser' (consume parser :right-brace "expected '}' after a block")]
         (add-expr parser' (ast/block stmts)))
       (let [parser' (declaration parser)
@@ -320,7 +299,7 @@
         (recur parser' stmts')))))
 
 (defn- parameters [parser]
-  (if (matches? parser :right-paren)
+  (if (tok-match? :right-paren parser)
     (assoc (advance parser) :expr [])
     (loop [parser parser
            params []]
@@ -329,7 +308,7 @@
                        (add-error parser' "cannot have more than 255 parameters")
                        parser')
             params' (conj params (current-token parser))]
-        (if (matches? parser'' :comma)
+        (if (tok-match? :comma parser'')
           (recur (advance parser'') params')
           (let [r-par (consume parser'' :right-paren "expected ')' after parameters")]
             (assoc r-par :expr params')))))))
@@ -349,15 +328,16 @@
 (defn- class-decl [parser]
   (let [name-token (current-token parser)
         cl-name (consume parser :identifier "expected class name")
-        super? (matches? cl-name :less)
+        cl-name' (advance cl-name)
+        super? (tok-match? :less cl-name)
         super (if super?
-                (consume (advance cl-name) :identifier "expected superclass name")
+                (consume cl-name' :identifier "expected superclass name")
                 cl-name)
-        superclass (when super? (ast/variable (current-token (advance cl-name))))
+        superclass (when super? (ast/variable (current-token cl-name')))
         l-brace (consume super :left-brace "expected '{' before class body")]
     (loop [p l-brace
            methods []]
-      (if (or (at-end? p) (matches? p :right-brace))
+      (if (or (at-end? p) (tok-match? :right-brace p))
         (let [r-brace (consume p :right-brace "expected '}' after class body")]
           (add-expr r-brace (ast/class-stmt name-token superclass methods)))
         (let [p' (func-decl p :method)]
@@ -365,32 +345,34 @@
 
 
 (defn- statement [parser]
-  (cond
-    (matches? parser :for) (for-loop parser)
-    (matches? parser :if) (if-stmt parser)
-    (matches? parser :left-brace) (block (advance parser))
-    (matches? parser :print) (print-stmt parser)
-    (matches? parser :return) (return-stmt parser)
-    (matches? parser :while) (while-stmt parser)
-    :else (expression-stmt parser)))
+  (let [parser' (advance parser)]
+    (case (tok-type parser)
+      :for        (for-loop parser')
+      :if         (if-stmt parser')
+      :left-brace (block parser')
+      :print      (print-stmt parser')
+      :return     (return-stmt parser' (current-token parser))
+      :while      (while-stmt parser')
+      (expression-stmt parser))))
 
 (defn- synchronize [parser]
-  (cond
-    (at-end? parser) parser
-    (matches? parser :semicolon) (advance parser)
-    (matches? parser #{:class :fun :var :for :if :while :print :return}) parser
-    :else (recur (advance parser))))
-
+  (let [ttype (tok-type parser)]
+    (cond
+      (at-end? parser) parser
+      (= :semicolon ttype) (advance parser)
+      (#{:class :fun :var :for :if :while :print :return} ttype) parser
+      :else (recur (advance parser)))))
 
 (defn- declaration [parser]
-  (try
-    (cond
-      (matches? parser :class) (class-decl (advance parser))
-      (matches? parser :fun) (func-decl (advance parser) :func)
-      (matches? parser :var) (var-decl (advance parser))
-      :else (statement parser))
-    (catch clojure.lang.ExceptionInfo e
-      (synchronize (ex-data e)))))
+  (let [parser' (advance parser)]
+    (try
+      (case (tok-type parser)
+        :class (class-decl parser')
+        :fun   (func-decl parser' :func)
+        :var   (var-decl parser')
+        (statement parser))
+      (catch clojure.lang.ExceptionInfo e
+        (synchronize (ex-data e))))))
 
 
 
