@@ -11,3 +11,35 @@ I tried to keep the git history as clean as possible (nobody will ever know abou
 A note about performance:
 The execution speed was not my goal, and it shows.
 Run the benchmarks at your own risk.
+
+
+
+
+## Running
+
+After I made a switch to a much faster implementation of `ReturnException`, you need to compile its class before running any code:
+
+```
+clojure -T:build compile-return-ex
+```
+
+After that, you can:
+
+- start an interpreter:
+  ```
+  clj -M -m cljox.core
+  ```
+
+- run a file:
+  ```
+  clj -M -m cljox.core <path-to-file>
+  ```
+
+
+Alternatively, you can build a `jar` of a whole project and run it via Java:
+
+```
+clojure -T:build uber
+
+java -jar target/cljox.jar [<path-to-file>]
+```

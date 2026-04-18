@@ -1,7 +1,8 @@
 (ns cljox.interpreter
   (:require [clojure.string :as str]
             [cljox.error :as err]
-            [cljox.environment :as env]))
+            [cljox.environment :as env])
+  (:import [cljox ReturnException]))
 
 
 (defmulti evaluate
@@ -156,12 +157,11 @@
     (-> state
         (eval-stmts (:body decl))
         (assoc :result (when init? (@closure "this"))))
-    (catch clojure.lang.ExceptionInfo e
-      (if (= "return statement" (ex-message e))
-        (if init?
-          (assoc state :result (@closure "this"))
-          (:state (ex-data e)))
-        (throw e)))))
+    (catch ReturnException e
+      (if init?
+         (assoc state :result (@closure "this"))
+         (.state e)))))
+
 
 (defn- find-method [{:keys [methods super]} name]
   (if-let [method (methods name)]
@@ -327,7 +327,7 @@
   (let [state' (if (nil? value)
                  (assoc state :result nil)
                  (evaluate state value))]
-    (throw (ex-info "return statement" {:state state'}))))
+    (throw (ReturnException. state'))))
 
 (defmethod evaluate :set-expr
   [state {:keys [object token value]}]
