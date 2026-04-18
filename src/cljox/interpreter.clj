@@ -1,12 +1,10 @@
 (ns cljox.interpreter
   (:require [clojure.string :as str]
             [cljox.error :as err]
-            [cljox.environment :as env])
+            [cljox.environment :as env]
+            [cljox.resolver :as r])
   (:import [cljox ReturnException]))
 
-
-(defmulti evaluate
-  (fn [_ m] (:type m)))
 
 (defprotocol LoxCallable
   (arity [this])
@@ -18,6 +16,9 @@
   (getter [this token])
   (setter! [this token value]))
 
+(defprotocol LoxType
+  (evaluate [this state])
+  (semcheck [this sc]))
 
 
 (defn- throw-error [token msg]
@@ -80,63 +81,99 @@
    :star          *})
 
 
-(defmethod evaluate :assignment
-  [state {:keys [token value] :as asgn}]
-  (let [state' (evaluate state value)]
-    (assign-var state' token asgn (:result state'))))
-
-
-(defmethod evaluate :binary
-  [state {:keys [left right operator]}]
-  (let [state'  (evaluate state left)
-        l       (:result state')
-        state'' (evaluate state' right)
-        r       (:result state'')
-        op-type (:type operator)
-        op-fn   (op-type operations)]
-    (assoc state'' :result
-           (case op-type
-             :bang-equal  (not= l r)
-             :equal-equal (= l r)
-             :plus        (plus operator l r)
-             (:greater :greater-equal :less :less-equal :minus :slash :star)
-             (numeric-op operator op-fn l r)))))
 
 (defn- eval-stmts [state stmts]
-  (reduce evaluate state stmts))
+  (reduce #(evaluate %2 %1) state stmts))
 
-(defmethod evaluate :block
-  [state {:keys [stmts]}]
-  (-> state
-      (update :env env/scope-push)
-      (eval-stmts stmts)
-      (update :env env/scope-pop)
-      (assoc :result nil)))
+(defn- semcheck-stmts [sc stmts]
+  (reduce #(semcheck %2 %1) sc stmts))
+
+(defn- resolve-func [sc {:keys [params body]} func-type]
+  (-> sc
+      (update :func-stack conj func-type)
+      r/begin-scope
+      (r/declare-and-define-params params)
+      (semcheck-stmts body)
+      r/end-scope
+      (update :func-stack pop)))
+
+
+
+(defrecord Assignment [token value]
+  LoxType
+  (evaluate [asgn state]
+    (let [state' (evaluate value state)]
+      (assign-var state' token asgn (:result state'))))
+  (semcheck [asgn sc]
+    (-> (semcheck value sc)
+        (r/resolve-local asgn (:lexeme token)))))
+
+
+(defrecord Binary [left operator right]
+  LoxType
+  (evaluate [_ state]
+    (let [state'  (evaluate left state)
+          l       (:result state')
+          state'' (evaluate right state')
+          r       (:result state'')
+          op-type (:type operator)
+          op-fn   (op-type operations)]
+      (assoc state'' :result
+             (case op-type
+               :bang-equal  (not= l r)
+               :equal-equal (= l r)
+               :plus        (plus operator l r)
+               (:greater :greater-equal :less :less-equal :minus :slash :star)
+               (numeric-op operator op-fn l r)))))
+  (semcheck [_ sc]
+    (->> sc
+         (semcheck left)
+         (semcheck right))))
+
+
+(defrecord Block [stmts]
+  LoxType
+  (evaluate [_ state]
+    (-> state
+        (update :env env/scope-push)
+        (eval-stmts stmts)
+        (update :env env/scope-pop)
+        (assoc :result nil)))
+  (semcheck [_ sc]
+    (-> sc
+        r/begin-scope
+        (semcheck-stmts stmts)
+        r/end-scope)))
 
 (defn- eval-args [state args]
   (reduce
    (fn [s arg]
      (let [res (:result s)
-           s' (evaluate s arg)]
+           s' (evaluate arg s)]
        (assoc s' :result (conj res (:result s')))))
    (assoc state :result [])
    args))
 
-(defmethod evaluate :call
-  [state {:keys [calee args paren]}]
-  (let [state' (evaluate state calee)
-        calee' (:result state')
-        state'' (eval-args state' args)
-        args' (:result state'')]
-    (cond
-      (not (satisfies? LoxCallable calee'))
-      (throw-error paren "can only call functions and classes")
+(defrecord Call [calee paren args]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate calee state)
+          calee' (:result state')
+          state'' (eval-args state' args)
+          args' (:result state'')]
+      (cond
+        (not (satisfies? LoxCallable calee'))
+        (throw-error paren "can only call functions and classes")
 
-      (not= (arity calee') (count args'))
-      (throw-error paren (format "expected %d arguments, but got %d"
-                                 (arity calee') (count args')))
-      :else
-      (call calee' state'' args'))))
+        (not= (arity calee') (count args'))
+        (throw-error paren (format "expected %d arguments, but got %d"
+                                   (arity calee') (count args')))
+        :else
+        (call calee' state'' args'))))
+
+  (semcheck [_ sc]
+    (let [sc' (semcheck calee sc)]
+      (reduce #(semcheck %2 %1) sc' args))))
 
 
 (defn- declare-var [state token value]
@@ -169,52 +206,43 @@
 
 (defrecord LoxFunction [decl closure init?]
   LoxCallable
-
-  (arity [this]
-    (-> this :decl :params count))
-
+  (arity [_]
+    (-> decl :params count))
   (call [this state args]
     (let [current-env (:env state)]
       (-> state
-          (assoc :env (env/scope-push (:closure this)))
-          (declare-args (-> this :decl :params) args)
+          (assoc :env (env/scope-push closure))
+          (declare-args (:params decl) args)
           (execute-func-body this)
           (assoc :env current-env))))
-
-  (to-string [this]
-    (format "<fn %s>" (-> this :decl :token :lexeme))))
+  (to-string [_]
+    (format "<fn %s>" (-> decl :token :lexeme))))
 
 
 (defrecord LoxInstance [klass fields]
   ProtoInstance
-
   (method-bind [this {:keys [decl closure init?]}]
     (let [env (env/scope-push closure)]
       (env/declare-name! env "this" this)
       (->LoxFunction decl env init?)))
-
   (getter [this token]
     (let [name (:lexeme token)
-          fields @(:fields this)]
-      (if (contains? fields name) ; it can exist and be `nil`
-        (fields name)
-        (if-let [method-func (find-method (:klass this) name)]
+          field-name (@fields name :missing)] ; it can exist and be `nil`/`false`
+      (if-not (= :missing field-name)
+        field-name
+        (if-let [method-func (find-method klass name)]
           (method-bind this method-func)
           (throw-error token (format "undefined property '%s'" name))))))
-
-  (setter! [this token value]
-    (let [name (:lexeme token)]
-      (swap! (:fields this) assoc name value))))
+  (setter! [_ {:keys [lexeme]} value]
+    (swap! fields assoc lexeme value)))
 
 
 (defrecord LoxClass [name super methods]
   LoxCallable
-
   (arity [this]
     (if-let [init (find-method this "init")]
       (arity init)
       0))
-
   (call [this state args]
     (let [instance (->LoxInstance this (atom {}))
           init (find-method this "init")
@@ -223,17 +251,22 @@
                        (call state args))
                    state)]
       (assoc state' :result instance)))
+  (to-string [_] name))
 
-  (to-string [this]
-    (:name this)))
+
 
 (defn- eval-superclass [state super]
   (if super
-    (let [state' (evaluate state super)]
+    (let [state' (evaluate super state)]
       (if (instance? LoxClass (:result state'))
         state'
         (throw-error (:token super) "superclass must be a class")))
     (assoc state :result nil)))
+
+(defn- resolve-superclass [sc super]
+  (-> (semcheck super sc)
+      r/begin-scope
+      (r/add-to-scope "super" true)))
 
 (defn- create-methods [env methods]
   (reduce (fn [acc method]
@@ -243,62 +276,117 @@
           {}
           methods))
 
-(defmethod evaluate :class-stmt
-  [state {:keys [token super methods]}]
-  (let [name (:lexeme token)
-        state' (eval-superclass state super)
-        superclass (:result state')
-        curr-env (:env state')
-        new-env (if super
-                  (-> (env/scope-push curr-env)
-                      (env/declare-name! "super" superclass))
-                  curr-env)
-        methods (create-methods new-env methods)
-        klass (->LoxClass name superclass methods)]
-    (declare-var state' token klass)))
+(defn- resolve-methods [sc methods]
+  (reduce (fn [sc method]
+            (let [func-type (if (= "init" (-> method :token :lexeme))
+                              :init
+                              :method)]
+              (resolve-func sc method func-type)))
+          sc
+          methods))
 
 
-(defmethod evaluate :expr-stmt
-  [state expr]
-  (evaluate state (:expr expr)))
+(defrecord ClassStmt [token super methods]
+  LoxType
+  (evaluate [_ state]
+    (let [name (:lexeme token)
+          state' (eval-superclass state super)
+          superclass (:result state')
+          curr-env (:env state')
+          new-env (if super
+                    (-> (env/scope-push curr-env)
+                        (env/declare-name! "super" superclass))
+                    curr-env)
+          methods (create-methods new-env methods)
+          klass (->LoxClass name superclass methods)]
+      (declare-var state' token klass)))
+  (semcheck [_ sc]
+    (if (and super
+             (= (:lexeme token) (-> super :token :lexeme)))
+      (r/add-error sc (:token super) "a class can't inherit from itself")
+      (-> sc
+          (update :class-stack conj (if super :subclass :class))
+          (r/declare-tok token)
+          (r/define-tok token)
+          (cond-> super (resolve-superclass super))
+          r/begin-scope
+          (r/add-to-scope "this" true)
+          (resolve-methods methods)
+          r/end-scope
+          (cond-> super r/end-scope)
+          (update :class-stack pop)))))
 
-(defmethod evaluate :func-decl
-  [state stmt]
-  (declare-var state (:token stmt) (->LoxFunction stmt (:env state) false)))
 
-(defmethod evaluate :get-expr
-  [state {:keys [object token]}]
-  (let [state' (evaluate state object)
-        obj (:result state')]
-    (if (instance? LoxInstance obj)
-      (assoc state' :result (getter obj token))
-      (throw-error token "only instances have properties"))))
+(defrecord ExprStmt [expr]
+  LoxType
+  (evaluate [_ state] (evaluate expr state))
+  (semcheck [_ sc] (semcheck expr sc)))
 
-(defmethod evaluate :grouping
-  [state expr]
-  (evaluate state (:expr expr)))
 
-(defmethod evaluate :if-stmt
-  [state {:keys [cnd then else]}]
-  (let [state' (evaluate state cnd)]
-    (cond
-      (truthy? (:result state')) (evaluate state' then)
-      (some? else) (evaluate state' else)
-      :else (assoc state' :result nil))))
+(defrecord FuncDecl [token params body]
+  LoxType
+  (evaluate [stmt state]
+    (declare-var state token (->LoxFunction stmt (:env state) false)))
+  (semcheck [node sc]
+    (-> sc
+        (r/declare-tok token)
+        (r/define-tok token)
+        (resolve-func node :func))))
 
-(defmethod evaluate :literal
-  [state expr]
-  (assoc state :result (:value expr)))
 
-(defmethod evaluate :logical
-  [state {:keys [left operator right]}]
-  (let [state' (evaluate state left)
-        l (:result state')
-        op-type (:type operator)]
-    (cond
-      (or (and (= :or op-type) (truthy? l))
-          (and (= :and op-type) (not (truthy? l)))) state'
-      :else (evaluate state' right))))
+(defrecord GetExpr [object token]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate object state)
+          obj (:result state')]
+      (if (instance? LoxInstance obj)
+        (assoc state' :result (getter obj token))
+        (throw-error token "only instances have properties"))))
+  (semcheck [_ sc]
+    (semcheck object sc)))
+
+
+(defrecord Grouping [expr]
+  LoxType
+  (evaluate [_ state] (evaluate expr state))
+  (semcheck [_ sc] (semcheck expr sc)))
+
+
+(defrecord IfStmt [cnd then else]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate cnd state)]
+      (cond
+        (truthy? (:result state')) (evaluate then state')
+        (some? else) (evaluate else state')
+        :else (assoc state' :result nil))))
+  (semcheck [_ sc]
+    (->> sc
+         (semcheck cnd)
+         (semcheck then)
+         (#(if else (semcheck else %) %)))))
+
+
+(defrecord Literal [value]
+  LoxType
+  (evaluate [_ state] (assoc state :result value))
+  (semcheck [_ sc] sc))
+
+
+(defrecord Logical [left operator right]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate left state)
+          l (:result state')
+          op-type (:type operator)]
+      (cond
+        (or (and (= :or op-type) (truthy? l))
+            (and (= :and op-type) (not (truthy? l)))) state'
+        :else (evaluate right state'))))
+  (semcheck [_ sc]
+    (->> sc
+         (semcheck left)
+         (semcheck right))))
 
 (defn- prettify [v]
   (cond
@@ -314,74 +402,127 @@
   (println (prettify (:result state)))
   (assoc state :result nil))
 
-(defmethod evaluate :print-stmt
-  [state {:keys [expr]}]
-  (-> state
-      (evaluate expr)
-      print-result))
+(defrecord PrintStmt [expr]
+  LoxType
+  (evaluate [_ state]
+    (->> state
+         (evaluate expr)
+         print-result))
+  (semcheck [_ sc]
+    (semcheck expr sc)))
 
-(defmethod evaluate :return-stmt
-  [state {:keys [value]}]
-  (let [state' (if (nil? value)
-                 (assoc state :result nil)
-                 (evaluate state value))]
-    (throw (ReturnException. state'))))
 
-(defmethod evaluate :set-expr
-  [state {:keys [object token value]}]
-  (let [state' (evaluate state object)
-        obj (:result state')]
-    (if (instance? LoxInstance obj)
-      (let [state'' (evaluate state' value)
-            v (:result state'')]
-        (setter! obj token v)
-        state'')
-      (throw-error token "only instances have fields"))))
+(defrecord ReturnStmt [kword value]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (if (nil? value)
+                   (assoc state :result nil)
+                   (evaluate value state))]
+      (throw (ReturnException. state'))))
+  (semcheck [_ sc]
+    (cond
+      (empty? (:func-stack sc)) (r/add-error sc kword "can't return from top-level code")
+      (some? value) (if (= :init (peek (:func-stack sc)))
+                      (r/add-error sc kword "can't return a value from an initializer")
+                      (semcheck value sc))
+      :else sc)))
 
-(defmethod evaluate :super
-  [state expr]
-  (let [dist ((:locals state) expr)
-        ob-env (env/go-up (:env state) (dec dist))
-        object (@ob-env "this")
-        sc-env (env/go-up ob-env 1)
-        superclass (@sc-env "super")
-        name (-> expr :method :lexeme)]
-    (if-let [method (find-method superclass name)]
-      (assoc state :result (method-bind object method))
-      (throw-error (:method expr) (format "undefined property '%s'" name)))))
+(defrecord SetExpr [object token value]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate object state)
+          obj (:result state')]
+      (if (instance? LoxInstance obj)
+        (let [state'' (evaluate value state')
+              v (:result state'')]
+          (setter! obj token v)
+          state'')
+        (throw-error token "only instances have fields"))))
+  (semcheck [_ sc]
+    (->> sc
+         (semcheck value)
+         (semcheck object))))
 
-(defmethod evaluate :this
-  [state expr]
-  (lookup-var state (:kword expr) expr))
+(defrecord Super [kword method]
+  LoxType
+  (evaluate [expr state]
+    (let [dist ((:locals state) expr)
+          ob-env (env/go-up (:env state) (dec dist))
+          object (@ob-env "this")
+          sc-env (env/go-up ob-env 1)
+          superclass (@sc-env "super")
+          name (-> expr :method :lexeme)]
+      (if-let [method (find-method superclass name)]
+        (assoc state :result (method-bind object method))
+        (throw-error (:method expr) (format "undefined property '%s'" name)))))
+  (semcheck [super sc]
+    (case (peek (:class-stack sc))
+      :subclass (r/resolve-local sc super (-> super :kword :lexeme))
+      :class (r/add-error sc (:kword super) "can't use 'super' in a class with no superclass")
+      nil (r/add-error sc (:kword super) "can't use 'super' outside of a class"))))
 
-(defmethod evaluate :var-decl
-  [state {:keys [token init]}]
-  (let [state' (if init
-                 (evaluate state init)
-                 (assoc state :result nil))]
-    (-> state'
-        (declare-var token (:result state'))
-        (assoc :result nil))))
+(defrecord This [kword]
+  LoxType
+  (evaluate [expr state]
+    (lookup-var state kword expr))
+  (semcheck [this sc]
+    (if (empty? (:class-stack sc))
+      (r/add-error sc kword "can't use 'this' outside of a class")
+      (r/resolve-local sc this (:lexeme kword)))))
 
-(defmethod evaluate :variable
-  [state var]
-  (lookup-var state (:token var) var))
 
-(defmethod evaluate :while-stmt
-  [state {:keys [cnd body] :as while}]
-  (let [state' (evaluate state cnd)]
-    (if (truthy? (:result state'))
-      (recur (evaluate state' body) while)
-      (assoc state' :result nil))))
+(defrecord Unary [operator right]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate right state)
+          value  (:result state')]
+      (assoc state' :result
+             (case (:type operator)
+               :minus (numeric-op operator - value)
+               :bang  (not (truthy? value))))))
+  (semcheck [_ sc]
+    (semcheck right sc)))
 
-(defmethod evaluate :unary
-  [state {:keys [operator right]}]
-  (let [state' (evaluate state right)
-        value  (:result state')]
-    (assoc state' :result
-           (case (:type operator)
-             :minus (numeric-op operator - value)
-             :bang  (not (truthy? value))))))
+
+(defrecord VarDecl [token init]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (if init
+                   (evaluate init state)
+                   (assoc state :result nil))]
+      (-> state'
+          (declare-var token (:result state'))
+          (assoc :result nil))))
+  (semcheck [_ sc]
+   (-> sc
+       (r/declare-tok token)
+       (cond->> init (semcheck init))
+       (r/define-tok token))))
+
+
+(defrecord Variable [token]
+  LoxType
+  (evaluate [var state]
+    (lookup-var state token var))
+  (semcheck [var sc]
+    (let [scope (peek (:scopes sc))
+          name (:lexeme token)]
+      (if (and scope (false? (scope name)))
+        (r/add-error sc token "can't read local variable in its own initializer")
+        (r/resolve-local sc var name)))))
+
+
+(defrecord WhileStmt [cnd body]
+  LoxType
+  (evaluate [_ state]
+    (let [state' (evaluate cnd state)]
+      (if (truthy? (:result state'))
+        (recur (evaluate body state'))
+        (assoc state' :result nil))))
+  (semcheck [_ sc]
+    (->> sc
+         (semcheck cnd)
+         (semcheck body))))
 
 (def clock
   (reify LoxCallable
@@ -393,6 +534,12 @@
 (def natives
   {"clock" clock})
 
+(defn resolve-locals [stmts]
+  (-> (r/new-semchecker)
+      (semcheck-stmts stmts)
+      ((juxt :locals :errors))))
+
+
 (defn new-interpreter []
   (let [globals (env/new-env natives)]
     {:env     globals
@@ -400,7 +547,6 @@
      :locals  {}
      :result  nil
      :errors  []}))
-
 
 (defn interpret [state stmts locals]
   (try

@@ -2,9 +2,9 @@
   (:require
    [cljox.scanner :as scanner]
    [cljox.parser :as parser]
-   [cljox.resolver :as resolver]
    [cljox.interpreter :as i]
-   [cljox.error :as err]))
+   [cljox.error :as err])
+  (:gen-class))
 
 
 (defn- error-exit [message code]
@@ -29,7 +29,7 @@
          errors (concat scan-errors parse-errors)]
      (if (seq errors)
        (err/print-errors errors)
-       (let [[locals resolve-errors] (resolver/resolve-locals stmts)]
+       (let [[locals resolve-errors] (i/resolve-locals stmts)]
          (if (seq resolve-errors)
            (err/print-errors resolve-errors)
            (-> state
@@ -52,7 +52,6 @@
       (:result (run state source)))
     (catch java.io.FileNotFoundException e
       (error-exit (ex-message e) 65))))
-
 
 
 (defn -main [& args]
