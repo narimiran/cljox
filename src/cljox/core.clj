@@ -45,7 +45,7 @@
       (recur (run state line)))))
 
 
-(defn- run-file [filename]
+(defn run-file [filename]
   (try
     (let [state (i/new-interpreter)
           source (slurp filename)]

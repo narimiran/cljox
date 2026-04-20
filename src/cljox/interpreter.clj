@@ -24,10 +24,6 @@
   (throw (ex-info "runtime error"
                   (err/runtime-error token msg))))
 
-(defn- declare-var [state token value]
-  (env/declare-name! (:env state) (:lexeme token) value)
-  state)
-
 (defn- assign-var [{:keys [locals globals env] :as state}
                    token expr value]
   (env/assign! (if-let [dist (locals expr)]
@@ -46,10 +42,9 @@
                       token)))
 
 (defn- truthy? [v]
-  (cond
-    (nil? v)   false
-    (false? v) false
-    :else      true))
+  (case v
+    (nil false) false
+    true))
 
 (defn- plus [token l r]
   (cond
@@ -144,13 +139,16 @@
       (call calee' state'' args'))))
 
 
+(defn- declare-var [state token value]
+  (env/declare-name! (:env state) (:lexeme token) value)
+  state)
 
 (defn- declare-args [state params args]
   (reduce
-   (fn [s [p a]]
-     (declare-var s p a))
+   (fn [s i]
+     (declare-var s (params i) (args i)))
    state
-   (zipmap params args)))
+   (range (count params))))
 
 (defn- execute-func-body [state {:keys [decl closure init?]}]
   (try
@@ -298,8 +296,8 @@
         l (:result state')
         op-type (:type operator)]
     (cond
-      (and (= :or op-type) (truthy? l)) state'
-      (and (= :and op-type) (not (truthy? l))) state'
+      (or (and (= :or op-type) (truthy? l))
+          (and (= :and op-type) (not (truthy? l)))) state'
       :else (evaluate state' right))))
 
 (defn- prettify [v]

@@ -23,9 +23,10 @@
     (recur (:enclosing @env) (dec dist))))
 
 (defn get-var [env token]
-  (let [lex (:lexeme token)]
-    (if (contains? @env lex) ; it can exist and be `nil`
-      (@env lex)
+  (let [lex (:lexeme token)
+        var (@env lex :missing)] ; it can exist and be `nil`/`false`
+    (if-not (= :missing var)
+      var
       (throw-error token (format "undefined variable '%s'" lex)))))
 
 (defn assign! [env token value]
